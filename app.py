@@ -244,10 +244,17 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode):
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
     b = bounds_for(all_points) if not all_points.empty else None
 
-    m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap", prefer_canvas=True)
+    m = folium.Map(location=center, zoom_start=zoom, tiles=None, prefer_canvas=True)
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        attr='&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        name="Fond clair (par défaut)",
+        show=True,
+    ).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="OpenStreetMap (standard)", show=False).add_to(m)
     folium.TileLayer(
         tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-        attr="OpenTopoMap", name="Relief",
+        attr="OpenTopoMap", name="Relief", show=False,
     ).add_to(m)
 
     palette_map = {}
