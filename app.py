@@ -109,9 +109,21 @@ DATE_FILTERS = [
     ("Date prochaine rénovation", "Date prochaine réno"),
 ]
 
+# Un point de référence est soit posé librement (clic sur la carte ou
+# coordonnées saisies), soit un point d'intérêt choisi dans la liste. Seul le
+# second cas a un vrai trajet routier associé (voir sidebar_distance_filter) :
+# un point libre reste toujours en distance à vol d'oiseau.
+REF_SOURCE_MANUAL = "Point choisi (clic sur la carte ou coordonnées)"
+REF_SOURCE_POI = "Point d'intérêt"
+
+# Nombre max de vignettes affichées dans la galerie du popup, au-delà on se
+# contente d'indiquer combien il en reste (éviter un popup démesuré).
+MAX_POPUP_PHOTOS = 12
+
 
 def init_state():
     st.session_state.setdefault("ref_point", None)
+    st.session_state.setdefault("ref_source", REF_SOURCE_MANUAL)
     st.session_state.setdefault("radius_km", 15)
     st.session_state.setdefault("distance_filter_on", False)
     st.session_state.setdefault("distance_mode", "Distance (vol d'oiseau)")
@@ -198,12 +210,26 @@ def build_popup_html(row):
     lines = []
     photos = get_hotel_photos(row.get("ID"))
     if photos:
-        try:
-            lines.append(f'<img src="{get_thumbnail_data_uri(photos[0], 320)}" style="display:block;border-radius:4px;margin-bottom:6px;max-width:100%;">')
-            if len(photos) > 1:
-                lines.append(f'<span style="color:#666;font-size:0.85em;">+{len(photos) - 1} autre(s) photo(s) dans data/photos/{row.get("ID")}/</span>')
-        except Exception:
-            pass
+        shown = photos[:MAX_POPUP_PHOTOS]
+        main_html = None
+        thumb_html = []
+        for i, photo in enumerate(shown):
+            try:
+                width = 320 if i == 0 else 90
+                uri = get_thumbnail_data_uri(photo, width)
+            except Exception:
+                continue
+            if i == 0:
+                main_html = f'<img src="{uri}" style="display:block;border-radius:4px;margin-bottom:4px;max-width:100%;">'
+            else:
+                thumb_html.append(f'<img src="{uri}" style="width:64px;height:64px;object-fit:cover;border-radius:4px;">')
+        gallery_html = (main_html or "") + (
+            f'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">{"".join(thumb_html)}</div>' if thumb_html else ""
+        )
+        if gallery_html:
+            lines.append(gallery_html)
+        if len(photos) > MAX_POPUP_PHOTOS:
+            lines.append(f'<span style="color:#666;font-size:0.85em;">+{len(photos) - MAX_POPUP_PHOTOS} autre(s) photo(s) dans data/photos/{row.get("ID")}/</span>')
 
     lines += [
         f"<b>{format_field_value('Nom', row.get('Nom')) or MISSING_LABEL}</b>",
@@ -262,6 +288,17 @@ def _load_with_persistence(uploader_label, uploader_key, persist_path: Path, def
     return df, status
 
 
+def poi_layer_label(row):
+    """Nom de couche affichée pour un point d'intérêt : le type (onglet)
+    seul, ou "Type — Sous-type" quand l'onglet distingue des sous-catégories
+    (ex. les sites d'entraînement "VSTS" / "TBC" / "RBC"), pour que chacune
+    devienne une couche indépendante, activable séparément."""
+    sous = row.get("Sous-type")
+    if sous is not None and not (isinstance(sous, float) and pd.isna(sous)) and str(sous).strip():
+        return f"{row['Type']} — {sous}"
+    return row["Type"]
+
+
 def sidebar_data_sources():
     with st.sidebar.container(border=True):
         st.markdown("### 📂 Données")
@@ -278,6 +315,9 @@ def sidebar_data_sources():
         except Exception:
             pois_df = pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
             st.warning("Impossible de lire le fichier de points d'intérêt.")
+
+    if not pois_df.empty:
+        pois_df = pois_df.assign(**{"Couche POI": pois_df.apply(poi_layer_label, axis=1)})
 
     return hotels_df, pois_df
 
@@ -350,13 +390,21 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
 
         st.markdown("**Couches**")
         show_hotels = st.checkbox("Hôtels", value=True)
-        poi_types = sorted(pois_df["Type"].dropna().unique().tolist())
-        active_poi_types = []
-        if poi_types:
+        active_poi_layers = []
+        if not pois_df.empty:
             st.caption("Points d'intérêt")
-            for t in poi_types:
-                if st.checkbox(f"　{t}", value=True, key=f"poi_{t}"):
-                    active_poi_types.append(t)
+            for t in sorted(pois_df["Type"].dropna().unique().tolist()):
+                layer_names = sorted(pois_df.loc[pois_df["Type"] == t, "Couche POI"].dropna().unique().tolist())
+                if len(layer_names) <= 1:
+                    layer_name = layer_names[0] if layer_names else t
+                    if st.checkbox(f"　{t}", value=True, key=f"poi_{layer_name}"):
+                        active_poi_layers.append(layer_name)
+                else:
+                    st.caption(f"　{t}")
+                    for layer_name in layer_names:
+                        sub_label = layer_name.split(" — ", 1)[-1]
+                        if st.checkbox(f"　　{sub_label}", value=True, key=f"poi_{layer_name}"):
+                            active_poi_layers.append(layer_name)
 
         st.markdown("**Taille des bulles**")
         size_options = dict(NUMERIC_FILTERS)
@@ -391,21 +439,37 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
             default=DEFAULT_TOOLTIP_FIELDS, key="tooltip_fields",
         )
 
-    return show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
+    return show_hotels, active_poi_layers, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
 
 
 def sidebar_distance_filter(pois_df: pd.DataFrame):
     with st.sidebar.container(border=True):
         st.markdown("### 📍 Distance / Temps de trajet")
-        st.caption("Clique sur la carte, choisis un point d'intérêt, ou saisis des coordonnées pour poser un point de référence.")
         st.session_state["distance_filter_on"] = st.checkbox(
             "Activer le filtre", value=st.session_state["distance_filter_on"]
         )
+        if not st.session_state["distance_filter_on"]:
+            return
 
-        st.session_state["distance_mode"] = st.radio(
-            "Filtrer selon", ["Distance (vol d'oiseau)", "Temps de trajet (voiture)"],
-            index=["Distance (vol d'oiseau)", "Temps de trajet (voiture)"].index(st.session_state["distance_mode"]),
+        source_options = [REF_SOURCE_MANUAL, REF_SOURCE_POI]
+        st.session_state["ref_source"] = st.radio(
+            "Point de référence", source_options,
+            index=source_options.index(st.session_state["ref_source"]),
         )
+        is_poi_source = st.session_state["ref_source"] == REF_SOURCE_POI and not pois_df.empty
+
+        if is_poi_source:
+            st.session_state["distance_mode"] = st.radio(
+                "Filtrer selon", ["Distance (vol d'oiseau)", "Temps de trajet (voiture)"],
+                index=["Distance (vol d'oiseau)", "Temps de trajet (voiture)"].index(st.session_state["distance_mode"]),
+            )
+        else:
+            st.session_state["distance_mode"] = "Distance (vol d'oiseau)"
+            st.caption(
+                "Un point cliqué sur la carte ou saisi à la main n'a pas de trajet routier "
+                "associé : seule la distance à vol d'oiseau est disponible. Choisis un point "
+                "d'intérêt comme référence pour activer le temps de trajet."
+            )
         is_travel_time = st.session_state["distance_mode"] == "Temps de trajet (voiture)"
 
         st.session_state["radius_km"] = st.slider(
@@ -431,29 +495,44 @@ def sidebar_distance_filter(pois_df: pd.DataFrame):
             provider = "OpenRouteService (clé configurée)" if using_ors() else "OSRM public (aucune clé configurée)"
             st.caption(f"Service de routage actif : **{provider}**. Chaque trajet calculé est mis en cache sur disque et n'est jamais recalculé.")
 
-        if not pois_df.empty:
-            pois_sorted = pois_df.sort_values(["Type", "Nom"]).reset_index(drop=True)
-            placeholder = "— Choisir un point d'intérêt —"
-            poi_options = [placeholder] + [f"{row['Nom']} ({row['Type']})" for _, row in pois_sorted.iterrows()]
-            poi_choice = st.selectbox("Point de référence = un point d'intérêt", poi_options, key="poi_ref_choice")
-            if poi_choice != placeholder:
-                selected = pois_sorted.iloc[poi_options.index(poi_choice) - 1]
-                st.session_state["ref_point"] = (float(selected["Latitude"]), float(selected["Longitude"]))
+        if is_poi_source:
+            poi_types = sorted(pois_df["Type"].dropna().unique().tolist())
+            poi_type_choice = st.selectbox("Type de point d'intérêt", poi_types, key="poi_type_choice")
+            subset = pois_df[pois_df["Type"] == poi_type_choice]
 
-        col1, col2 = st.columns(2)
-        with col1:
-            lat_in = st.number_input("Latitude", value=float(st.session_state["ref_point"][0]) if st.session_state["ref_point"] else 0.0, format="%.6f")
-        with col2:
-            lon_in = st.number_input("Longitude", value=float(st.session_state["ref_point"][1]) if st.session_state["ref_point"] else 0.0, format="%.6f")
-        apply_manual = st.button("Utiliser ces coordonnées")
-        if apply_manual and (lat_in != 0.0 or lon_in != 0.0):
-            st.session_state["ref_point"] = (lat_in, lon_in)
+            city_choice = "Toutes"
+            if subset["Ville"].notna().any():
+                cities = sorted(subset["Ville"].dropna().unique().tolist())
+                city_choice = st.selectbox("Ville", ["Toutes"] + cities, key=f"poi_city_choice_{poi_type_choice}")
+                if city_choice != "Toutes":
+                    subset = subset[subset["Ville"] == city_choice]
+
+            subset_sorted = subset.sort_values("Nom").reset_index(drop=True)
+            placeholder = "— Choisir un point d'intérêt —"
+            poi_options = [placeholder] + subset_sorted["Nom"].tolist()
+            poi_choice = st.selectbox(
+                "Point d'intérêt", poi_options, key=f"poi_ref_choice_{poi_type_choice}_{city_choice}"
+            )
+            if poi_choice != placeholder:
+                selected = subset_sorted[subset_sorted["Nom"] == poi_choice].iloc[0]
+                st.session_state["ref_point"] = (float(selected["Latitude"]), float(selected["Longitude"]))
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                lat_in = st.number_input("Latitude", value=float(st.session_state["ref_point"][0]) if st.session_state["ref_point"] else 0.0, format="%.6f")
+            with col2:
+                lon_in = st.number_input("Longitude", value=float(st.session_state["ref_point"][1]) if st.session_state["ref_point"] else 0.0, format="%.6f")
+            apply_manual = st.button("Utiliser ces coordonnées")
+            if apply_manual and (lat_in != 0.0 or lon_in != 0.0):
+                st.session_state["ref_point"] = (lat_in, lon_in)
+            st.caption("Ou clique directement sur la carte pour poser le point.")
+
         if st.button("Réinitialiser le point"):
             st.session_state["ref_point"] = None
             st.session_state["distance_filter_on"] = False
 
 
-def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale):
+def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated=0):
     center = [31.7917, -7.0926]
     zoom = 5.4
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
@@ -493,25 +572,37 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
                 fill_color=color,
                 fill_opacity=0.75,
                 tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True),
-                popup=folium.Popup(popup_html, max_width=280),
+                popup=folium.Popup(popup_html, max_width=340),
             ).add_to(hotel_layer)
         hotel_layer.add_to(m)
 
-    for poi_type in active_poi_types:
-        subset = pois_df[pois_df["Type"] == poi_type]
+    for layer_name in active_poi_layers:
+        subset = pois_df[pois_df["Couche POI"] == layer_name]
         if subset.empty:
             continue
-        layer = folium.FeatureGroup(name=poi_type, show=True)
-        color = POI_TYPE_COLORS.get(poi_type, "#333333")
-        icon = POI_TYPE_ICON.get(poi_type, "map-marker")
+        layer = folium.FeatureGroup(name=layer_name, show=True)
+        base_type = subset["Type"].iloc[0]
+        color = POI_TYPE_COLORS.get(base_type, "#333333")
+        icon = POI_TYPE_ICON.get(base_type, "map-marker")
         for _, row in subset.iterrows():
-            poi_tooltip = escape_backticks(html_lib.escape(f"{row['Nom']} ({poi_type})"))
+            poi_tooltip = escape_backticks(html_lib.escape(f"{row['Nom']} ({layer_name})"))
             folium.Marker(
                 location=[row["Latitude"], row["Longitude"]],
                 tooltip=folium.Tooltip(poi_tooltip, sticky=True),
                 icon=folium.Icon(color="lightgray", icon_color=color, icon=icon, prefix="fa"),
             ).add_to(layer)
         layer.add_to(m)
+
+    if n_estimated:
+        banner_html = f'''
+        <div style="position:fixed; top:56px; right:10px; z-index:9999;
+                    background:#ffe066; color:#5c4400; padding:6px 12px;
+                    border-radius:6px; font-weight:600; font-size:13px;
+                    box-shadow:0 1px 4px rgba(0,0,0,0.3); border:1px solid #f0c419;">
+            ⚠️ Estimation interpolée ({n_estimated} hôtel(s)) — pas encore un vrai temps de trajet
+        </div>
+        '''
+        m.get_root().html.add_child(folium.Element(banner_html))
 
     ref_point = st.session_state.get("ref_point")
     if ref_point and st.session_state.get("distance_filter_on"):
@@ -539,10 +630,11 @@ def main():
     )
 
     hotels_df, pois_df = sidebar_data_sources()
-    show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
+    show_hotels, active_poi_layers, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
     filtered_df = sidebar_filters(hotels_df)
     sidebar_distance_filter(pois_df)
 
+    n_estimated_for_banner = 0
     if st.session_state["distance_filter_on"] and st.session_state["ref_point"]:
         lat0, lon0 = st.session_state["ref_point"]
         dist = haversine_km(lat0, lon0, filtered_df["Latitude"].values, filtered_df["Longitude"].values)
@@ -552,6 +644,7 @@ def main():
         if st.session_state["distance_mode"] == "Temps de trajet (voiture)" and not filtered_df.empty:
             with st.spinner(f"Calcul du temps de trajet pour {len(filtered_df)} hôtel(s) (mise en cache pour les prochaines fois)..."):
                 travel_times, travel_error, n_estimated = get_travel_times_with_fallback((lat0, lon0), filtered_df)
+            n_estimated_for_banner = n_estimated
             raw_minutes = pd.to_numeric(
                 pd.Series([travel_times.get(str(hid)) for hid in filtered_df["ID"]], index=filtered_df.index),
                 errors="coerce",
@@ -587,14 +680,19 @@ def main():
     kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
     kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
 
-    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale)
+    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated_for_banner)
     map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
                            returned_objects=["last_clicked"])
     if map_state and map_state.get("last_clicked"):
         clicked = map_state["last_clicked"]
         new_point = (clicked["lat"], clicked["lng"])
         if new_point != st.session_state.get("ref_point"):
+            # Un clic sur la carte pose toujours un point "libre" : on repasse
+            # explicitement en distance à vol d'oiseau (pas de trajet routier
+            # associé à un point cliqué au hasard).
             st.session_state["ref_point"] = new_point
+            st.session_state["ref_source"] = REF_SOURCE_MANUAL
+            st.session_state["distance_mode"] = "Distance (vol d'oiseau)"
             st.rerun()
 
     st.markdown(f"**Légende couleur : {color_label}**")
@@ -636,12 +734,12 @@ def main():
     with st.expander("ℹ️ À propos de cet outil / prochaines étapes"):
         st.markdown(
             """
-            - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque type de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale.
+            - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque couche de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale — une couche par type (onglet du fichier POI), et une couche séparée par sous-type quand l'onglet en distingue (ex. sites d'entraînement VSTS / TBC / RBC).
             - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
             - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
-            - **Distance / Temps de trajet** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre puis choisis "Distance (vol d'oiseau)" ou "Temps de trajet (voiture)". En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable.
-            - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Aucune modification du fichier Excel n'est nécessaire.
+            - **Distance / Temps de trajet** : active le filtre, puis choisis la source du point de référence — "Point choisi" (clic sur la carte ou coordonnées saisies, toujours en distance à vol d'oiseau) ou "Point d'intérêt" (permet en plus le temps de trajet réel en voiture). En mode point d'intérêt, choisis d'abord le type (stade, site d'entraînement...), puis la ville si l'onglet en propose une, puis le point précis. En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable. Un bandeau jaune en haut à droite de la carte signale quand des temps affichés sont des estimations interpolées (pas encore de vrai calcul, voir `scripts/estimate_travel_times.py`).
+            - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol ; le clic affiche toutes les photos (la première en grand, les suivantes en galerie de vignettes). Aucune modification du fichier Excel n'est nécessaire.
             - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
             """
         )

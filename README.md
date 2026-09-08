@@ -15,8 +15,10 @@ Coupe du Monde 2030 au Maroc.
   - **couleur** selon un critère au choix (classement étoiles ou brut,
     catégorie, statut, ville hôte, signature, risque, visite), avec une
     couleur personnalisable par valeur.
-- **Couches activables/désactivables** : hôtels, et un type de point
-  d'intérêt par couche (une couche = un onglet du fichier POI).
+- **Couches activables/désactivables** : hôtels, et une couche par type de
+  point d'intérêt (un onglet du fichier POI) — quand un onglet distingue des
+  sous-catégories (ex. les sites d'entraînement "VSTS" / "TBC" / "RBC"),
+  chacune devient sa propre couche, activable indépendamment.
 - **Filtres sur (quasiment) toutes les colonnes** du fichier hôtels : ville
   hôte, ville, catégorie, classement, statut, propriétaire, opérateur,
   signatures, risque, visite, capacité, prix moyen (PMC), chambres
@@ -25,14 +27,21 @@ Coupe du Monde 2030 au Maroc.
 - **Infos au survol configurables** : choisis les champs affichés dans
   l'infobulle ; le clic affiche toujours la fiche complète. Un champ sans
   valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
-- **Photos** : une vignette par hôtel au survol, une version plus grande au
-  clic — voir [Photos des hôtels](#photos-des-hôtels) ci-dessous.
-- **Filtre par distance** : clique sur la carte (ou saisis une
-  latitude/longitude) pour poser un point de référence.
-  - **Vol d'oiseau** : rayon en km (toujours utilisé comme pré-filtre).
-  - **Temps de trajet (voiture)** : calcule le vrai temps de trajet routier
+- **Photos** : une vignette par hôtel au survol, la galerie complète (photo
+  principale + toutes les autres en vignettes) au clic — voir
+  [Photos des hôtels](#photos-des-hôtels) ci-dessous.
+- **Filtre par distance** : active le filtre puis choisis la source du point
+  de référence — un **point choisi** (clic sur la carte ou coordonnées
+  saisies) ou un **point d'intérêt** (choix du type, puis de la ville quand
+  l'onglet en propose une, puis du point précis).
+  - **Vol d'oiseau** : rayon en km (toujours utilisé comme pré-filtre) —
+    seul mode disponible pour un point choisi librement.
+  - **Temps de trajet (voiture)** : uniquement disponible avec un point
+    d'intérêt comme référence. Calcule le vrai temps de trajet routier
     (service de routage en ligne), **mis en cache sur disque** — un trajet
-    déjà calculé n'est jamais recalculé, même après redémarrage.
+    déjà calculé n'est jamais recalculé, même après redémarrage. Un bandeau
+    jaune en haut à droite de la carte signale quand des valeurs affichées
+    sont des estimations interpolées plutôt que de vrais temps calculés.
   - **Mode Escorte** : réduit le temps de trajet calculé d'un pourcentage
     réglable, pour simuler un déplacement accéléré.
 - **KPIs** (nombre d'hôtels, taux de géolocalisation, capacité totale,
@@ -87,10 +96,13 @@ onglet, colonnes attendues :
 
 - une colonne "nom" (première colonne de l'onglet, ex. `Stade`, `Aéroport`...),
 - `Latitude` et `Longitude` (obligatoires — un onglet sans ces deux colonnes est ignoré),
-- `Ville` (optionnelle),
+- `Ville` (optionnelle) — quand elle est renseignée, le filtre "Distance /
+  Temps de trajet" propose de choisir la ville avant le point d'intérêt
+  précis, pour retrouver plus vite le bon point dans une longue liste,
 - une éventuelle colonne `Type` propre à l'onglet (ex. sous-catégorie d'un
-  site d'entraînement) est conservée comme attribut ("Sous-type"), sans
-  créer de couche supplémentaire.
+  site d'entraînement, comme "VSTS"/"TBC"/"RBC") est conservée comme
+  attribut ("Sous-type") et devient sa **propre couche** sur la carte,
+  activable indépendamment des autres sous-catégories du même onglet.
 
 Les noms de colonnes proches (`Lat`/`Latitude`, `Lon`/`Lng`/`Longitude`,
 `City`/`Ville`, `Nom`/`Name`) sont détectés automatiquement.
@@ -111,8 +123,10 @@ data/photos/
 Formats acceptés : `.jpg`, `.jpeg`, `.png`, `.webp`. Aucune modification du
 fichier Excel n'est nécessaire — l'app détecte automatiquement les photos au
 démarrage. La première photo (ordre alphabétique) sert de vignette au
-survol ; le clic affiche une version plus grande et indique le nombre de
-photos supplémentaires. Ce dossier n'est **jamais versionné dans git**.
+survol ; le clic affiche la galerie complète (photo principale en grand,
+suivie de toutes les autres en vignettes, jusqu'à 12 affichées — au-delà,
+le nombre de photos restantes est indiqué). Ce dossier n'est **jamais
+versionné dans git**.
 
 ## Temps de trajet et cache
 
