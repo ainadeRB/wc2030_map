@@ -4,6 +4,7 @@ et points d'intérêt (stades, sites d'entraînement, aéroports...).
 Lancer avec : streamlit run app.py
 """
 from io import BytesIO
+from pathlib import Path
 
 import folium
 import numpy as np
@@ -25,9 +26,12 @@ from src.styling import (
 
 st.set_page_config(page_title="WC2030 Maroc – Carte Hôtels", page_icon="🗺️", layout="wide")
 
-DATA_DIR = "data"
-DEFAULT_HOTELS = f"{DATA_DIR}/sample_hotels.xlsx"
-DEFAULT_POIS = f"{DATA_DIR}/sample_poi.xlsx"
+DATA_DIR = Path("data")
+DEFAULT_HOTELS = DATA_DIR / "sample_hotels.xlsx"
+DEFAULT_POIS = DATA_DIR / "sample_poi.xlsx"
+# Fichiers réels de l'utilisateur : écrasés à chaque upload, conservés entre les sessions.
+HOTELS_PERSIST_PATH = DATA_DIR / "hotels.xlsx"
+POIS_PERSIST_PATH = DATA_DIR / "poi.xlsx"
 
 COLOR_MODES = {
     "Nouveau classement assimilé (étoiles)": "stars",
@@ -94,19 +98,43 @@ def _cached_pois(file_bytes_or_path, is_upload):
     return load_pois(file_bytes_or_path)
 
 
+def _load_with_persistence(uploader_label, uploader_key, persist_path: Path, default_path: Path, loader_bytes_fn):
+    """Widget d'upload qui écrit le fichier déposé sur disque (écrasé à chaque
+    nouvel upload), pour qu'il soit rechargé automatiquement aux prochaines
+    sessions sans avoir à le redéposer. Retourne (dataframe, message d'état)."""
+    uploaded = st.sidebar.file_uploader(uploader_label, type=["xlsx", "xls"], key=uploader_key)
+
+    if uploaded is not None:
+        persist_path.parent.mkdir(parents=True, exist_ok=True)
+        persist_path.write_bytes(uploaded.getvalue())
+        st.sidebar.success(f"Fichier enregistré → `{persist_path}`")
+
+    if persist_path.exists():
+        mtime = pd.Timestamp.fromtimestamp(persist_path.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
+        df = loader_bytes_fn(persist_path.read_bytes(), True)
+        status = f"✅ Fichier réel chargé (`{persist_path.name}`, mis à jour le {mtime})"
+        if st.sidebar.button("🗑️ Revenir aux données de démo", key=f"reset_{uploader_key}"):
+            persist_path.unlink(missing_ok=True)
+            st.rerun()
+    else:
+        df = loader_bytes_fn(default_path, False)
+        status = f"ℹ️ Données de démonstration (`{default_path.name}`) — dépose ton fichier ci-dessus pour le remplacer durablement."
+
+    return df, status
+
+
 def sidebar_data_sources():
     st.sidebar.header("📂 Données")
-    hotel_file = st.sidebar.file_uploader("Fichier hôtels (Excel)", type=["xlsx", "xls"], key="hotel_upload")
-    poi_file = st.sidebar.file_uploader("Fichier points d'intérêt (Excel)", type=["xlsx", "xls"], key="poi_upload")
-
-    hotels_df = _cached_hotels(hotel_file.getvalue(), True) if hotel_file else _cached_hotels(DEFAULT_HOTELS, False)
-    if not hotel_file:
-        st.sidebar.caption("ℹ️ Données de démonstration chargées (`data/sample_hotels.xlsx`). Dépose ton fichier réel ci-dessus pour le remplacer.")
+    hotels_df, hotels_status = _load_with_persistence(
+        "Fichier hôtels (Excel)", "hotel_upload", HOTELS_PERSIST_PATH, DEFAULT_HOTELS, _cached_hotels
+    )
+    st.sidebar.caption(hotels_status)
 
     try:
-        pois_df = _cached_pois(poi_file.getvalue(), True) if poi_file else _cached_pois(DEFAULT_POIS, False)
-        if not poi_file:
-            st.sidebar.caption("ℹ️ POI de démonstration chargés (`data/sample_poi.xlsx`).")
+        pois_df, pois_status = _load_with_persistence(
+            "Fichier points d'intérêt (Excel)", "poi_upload", POIS_PERSIST_PATH, DEFAULT_POIS, _cached_pois
+        )
+        st.sidebar.caption(pois_status)
     except Exception:
         pois_df = pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
         st.sidebar.warning("Impossible de lire le fichier de points d'intérêt.")

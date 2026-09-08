@@ -3,3 +3,8 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+
+# Fichiers réels uploadés (données projet sensibles) : jamais versionnés,
+# seules les données de démonstration (data/sample_*.xlsx) le sont.
+data/hotels.xlsx
+data/poi.xlsx

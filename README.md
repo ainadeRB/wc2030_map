@@ -28,6 +28,15 @@ et `data/sample_poi.xlsx`). Dépose tes propres fichiers Excel via les
 uploaders dans la barre latérale pour les remplacer — aucune modification de
 code n'est nécessaire.
 
+Chaque upload est **enregistré sur disque** (`data/hotels.xlsx` et
+`data/poi.xlsx`, écrasés à chaque nouveau dépôt) : au prochain lancement de
+l'app, ce sont automatiquement ces fichiers réels qui sont rechargés — pas
+besoin de les re-déposer à chaque fois. Un bouton "Revenir aux données de
+démo" dans la barre latérale supprime le fichier persistant et repasse sur
+les données d'exemple. Ces fichiers réels ne sont **jamais versionnés dans
+git** (voir `.gitignore`) : seules les données de démonstration
+(`data/sample_*.xlsx`) le sont.
+
 ## Format attendu — fichier hôtels
 
 Les colonnes suivantes sont reconnues automatiquement (les colonnes
