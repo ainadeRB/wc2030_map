@@ -46,16 +46,21 @@ COLOR_MODES = {
 # Fonds de carte gratuits, sans clé API (CARTO exige désormais une clé,
 # on utilise donc Esri/OpenStreetMap/OpenTopoMap qui restent libres d'accès).
 BASEMAPS = {
-    "Clair épuré (recommandé)": {
+    "Standard (rues, recommandé)": {"tiles": "OpenStreetMap", "attr": None, "max_zoom": 19},
+    "Clair épuré (gris)": {
         "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         "attr": "Tiles &copy; Esri — Esri, DeLorme, NAVTEQ",
+        "max_native_zoom": 16, "max_zoom": 19,
     },
-    "Standard (rues, OpenStreetMap)": {"tiles": "OpenStreetMap", "attr": None},
     "Satellite": {
         "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         "attr": "Tiles &copy; Esri — Esri, Maxar, Earthstar Geographics",
+        "max_zoom": 19,
     },
-    "Relief": {"tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "attr": "OpenTopoMap"},
+    "Relief": {
+        "tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "attr": "OpenTopoMap",
+        "max_native_zoom": 17, "max_zoom": 19,
+    },
 }
 
 HOTEL_INFO_FIELDS = [
@@ -340,12 +345,15 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
     b = bounds_for(all_points) if not all_points.empty else None
 
-    basemap = BASEMAPS.get(basemap_choice, BASEMAPS["Clair épuré (recommandé)"])
-    m = folium.Map(location=center, zoom_start=zoom, tiles=None, prefer_canvas=True)
+    basemap = BASEMAPS.get(basemap_choice, next(iter(BASEMAPS.values())))
+    m = folium.Map(location=center, zoom_start=zoom, tiles=None, prefer_canvas=True,
+                    max_zoom=basemap.get("max_zoom", 19))
+    tile_kwargs = {"tiles": basemap["tiles"], "name": basemap_choice, "max_zoom": basemap.get("max_zoom", 19)}
     if basemap["attr"]:
-        folium.TileLayer(tiles=basemap["tiles"], attr=basemap["attr"], name=basemap_choice).add_to(m)
-    else:
-        folium.TileLayer(tiles=basemap["tiles"], name=basemap_choice).add_to(m)
+        tile_kwargs["attr"] = basemap["attr"]
+    if basemap.get("max_native_zoom"):
+        tile_kwargs["max_native_zoom"] = basemap["max_native_zoom"]
+    folium.TileLayer(**tile_kwargs).add_to(m)
 
     if show_hotels and not hotels_df.empty:
         cap_series = hotels_df["Capacité act (cha.)"].dropna()
@@ -410,8 +418,6 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
     elif ref_point:
         folium.Marker(location=list(ref_point), icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
                        tooltip="Point de référence (clic)").add_to(m)
-
-    folium.LayerControl(collapsed=False).add_to(m)
 
     if b:
         m.fit_bounds(b)
