@@ -16,12 +16,11 @@ from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
 from src.geo import bounds_for, haversine_km
 from src.styling import (
     build_palette_map,
-    color_for_category,
-    color_for_star,
-    hex_to_rgba,
     scale_radius,
+    DEFAULT_COLOR,
     POI_TYPE_COLORS,
     POI_TYPE_ICON,
+    STAR_COLORS,
 )
 
 st.set_page_config(page_title="WC2030 Maroc – Carte Hôtels", page_icon="🗺️", layout="wide")
@@ -35,12 +34,41 @@ POIS_PERSIST_PATH = DATA_DIR / "poi.xlsx"
 
 COLOR_MODES = {
     "Nouveau classement assimilé (étoiles)": "stars",
+    "Nouveau classement assimilé (valeur brute)": "Nouveau classement assimilé",
+    "Catégorie": "Catégorie",
     "Nouveau Statut vérifié": "Nouveau Statut vérifié",
     "Ville hôte": "Ville hôte",
     "Signature": "Signature",
     "Risque": "Risque",
     "Visite": "Visite",
 }
+
+BASEMAPS = {
+    "Clair épuré (recommandé)": {
+        "tiles": "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        "attr": '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    "Très épuré (sans labels)": {
+        "tiles": "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+        "attr": '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    "Sombre": {
+        "tiles": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        "attr": '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    "Standard (OpenStreetMap)": {"tiles": "OpenStreetMap", "attr": None},
+    "Relief": {"tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "attr": "OpenTopoMap"},
+}
+
+HOTEL_INFO_FIELDS = [
+    "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
+    "Nouveau Statut vérifié", "Capacité act (cha.)", "#Chambres alloues total",
+    "PMC vérif", "Propriétaire", "Opérateur", "Signature", "Signature Prop",
+    "Signature Op", "Risque", "Visite", "Note Booking", "ID",
+]
+DEFAULT_TOOLTIP_FIELDS = [
+    "Nom", "Ville hôte", "Nouveau classement assimilé", "Capacité act (cha.)", "Nouveau Statut vérifié",
+]
 
 CATEGORICAL_FILTERS = [
     ("Ville hôte", "Ville hôte"),
@@ -84,6 +112,40 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
+def get_color_map(color_mode, values):
+    """Palette éditable par l'utilisateur pour le critère de couleur choisi,
+    conservée en session pour ne pas revenir aux couleurs par défaut à
+    chaque interaction."""
+    state_key = f"colormap_{color_mode}"
+    if state_key not in st.session_state:
+        if color_mode == "stars":
+            st.session_state[state_key] = {v: STAR_COLORS.get(int(v), DEFAULT_COLOR) for v in values}
+        else:
+            st.session_state[state_key] = build_palette_map(values)
+    else:
+        for v in values:
+            if v not in st.session_state[state_key]:
+                st.session_state[state_key][v] = DEFAULT_COLOR
+    return st.session_state[state_key]
+
+
+def build_tooltip_html(row, fields):
+    parts = []
+    for field in fields:
+        val = row.get(field)
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            continue
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            val = f"{val:,.0f}".replace(",", " ")
+        if field == "Nom":
+            parts.insert(0, f"<b>{val}</b>")
+        else:
+            parts.append(f"{field} : {val}")
+    if not parts:
+        parts = [str(row.get("Nom", ""))]
+    return "<br>".join(parts)
+
+
 @st.cache_data(show_spinner=False)
 def _cached_hotels(file_bytes_or_path, is_upload):
     if is_upload:
@@ -101,19 +163,21 @@ def _cached_pois(file_bytes_or_path, is_upload):
 def _load_with_persistence(uploader_label, uploader_key, persist_path: Path, default_path: Path, loader_bytes_fn):
     """Widget d'upload qui écrit le fichier déposé sur disque (écrasé à chaque
     nouvel upload), pour qu'il soit rechargé automatiquement aux prochaines
-    sessions sans avoir à le redéposer. Retourne (dataframe, message d'état)."""
-    uploaded = st.sidebar.file_uploader(uploader_label, type=["xlsx", "xls"], key=uploader_key)
+    sessions sans avoir à le redéposer. Retourne (dataframe, message d'état).
+    À appeler dans un bloc `with` (container/sidebar) pour que les widgets
+    s'affichent au bon endroit."""
+    uploaded = st.file_uploader(uploader_label, type=["xlsx", "xls"], key=uploader_key)
 
     if uploaded is not None:
         persist_path.parent.mkdir(parents=True, exist_ok=True)
         persist_path.write_bytes(uploaded.getvalue())
-        st.sidebar.success(f"Fichier enregistré → `{persist_path}`")
+        st.success(f"Fichier enregistré → `{persist_path}`")
 
     if persist_path.exists():
         mtime = pd.Timestamp.fromtimestamp(persist_path.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
         df = loader_bytes_fn(persist_path.read_bytes(), True)
         status = f"✅ Fichier réel chargé (`{persist_path.name}`, mis à jour le {mtime})"
-        if st.sidebar.button("🗑️ Revenir aux données de démo", key=f"reset_{uploader_key}"):
+        if st.button("🗑️ Revenir aux données de démo", key=f"reset_{uploader_key}"):
             persist_path.unlink(missing_ok=True)
             st.rerun()
     else:
@@ -124,20 +188,21 @@ def _load_with_persistence(uploader_label, uploader_key, persist_path: Path, def
 
 
 def sidebar_data_sources():
-    st.sidebar.header("📂 Données")
-    hotels_df, hotels_status = _load_with_persistence(
-        "Fichier hôtels (Excel)", "hotel_upload", HOTELS_PERSIST_PATH, DEFAULT_HOTELS, _cached_hotels
-    )
-    st.sidebar.caption(hotels_status)
-
-    try:
-        pois_df, pois_status = _load_with_persistence(
-            "Fichier points d'intérêt (Excel)", "poi_upload", POIS_PERSIST_PATH, DEFAULT_POIS, _cached_pois
+    with st.sidebar.container(border=True):
+        st.markdown("### 📂 Données")
+        hotels_df, hotels_status = _load_with_persistence(
+            "Fichier hôtels (Excel)", "hotel_upload", HOTELS_PERSIST_PATH, DEFAULT_HOTELS, _cached_hotels
         )
-        st.sidebar.caption(pois_status)
-    except Exception:
-        pois_df = pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
-        st.sidebar.warning("Impossible de lire le fichier de points d'intérêt.")
+        st.caption(hotels_status)
+
+        try:
+            pois_df, pois_status = _load_with_persistence(
+                "Fichier points d'intérêt (Excel)", "poi_upload", POIS_PERSIST_PATH, DEFAULT_POIS, _cached_pois
+            )
+            st.caption(pois_status)
+        except Exception:
+            pois_df = pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
+            st.warning("Impossible de lire le fichier de points d'intérêt.")
 
     return hotels_df, pois_df
 
@@ -145,121 +210,144 @@ def sidebar_data_sources():
 def sidebar_filters(df: pd.DataFrame):
     filtered = df.copy()
 
-    with st.sidebar.expander("🏙️ Localisation & classification", expanded=True):
-        for label, col in CATEGORICAL_FILTERS[:5]:
-            options = sorted(filtered[col].dropna().unique().tolist())
-            if not options:
-                continue
-            chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
-            if chosen:
-                filtered = filtered[filtered[col].isin(chosen)]
+    with st.sidebar.container(border=True):
+        st.markdown("### 🔍 Filtres")
 
-    with st.sidebar.expander("✍️ Parties prenantes & statut"):
-        for label, col in CATEGORICAL_FILTERS[5:]:
-            options = sorted(filtered[col].dropna().unique().tolist())
-            if not options:
-                continue
-            chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
-            if chosen:
-                filtered = filtered[filtered[col].isin(chosen)]
+        with st.expander("🏙️ Localisation & classification", expanded=True):
+            for label, col in CATEGORICAL_FILTERS[:5]:
+                options = sorted(filtered[col].dropna().unique().tolist())
+                if not options:
+                    continue
+                chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
+                if chosen:
+                    filtered = filtered[filtered[col].isin(chosen)]
 
-    with st.sidebar.expander("🔢 Capacité, prix & notes"):
-        for label, col in NUMERIC_FILTERS:
-            series = filtered[col].dropna()
-            if series.empty:
-                continue
-            vmin, vmax = float(series.min()), float(series.max())
-            if vmin == vmax:
-                continue
-            lo, hi = st.slider(label, min_value=float(np.floor(vmin)), max_value=float(np.ceil(vmax)),
-                                value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{col}")
-            filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
+        with st.expander("✍️ Parties prenantes & statut"):
+            for label, col in CATEGORICAL_FILTERS[5:]:
+                options = sorted(filtered[col].dropna().unique().tolist())
+                if not options:
+                    continue
+                chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
+                if chosen:
+                    filtered = filtered[filtered[col].isin(chosen)]
 
-    with st.sidebar.expander("📅 Dates"):
-        for label, col in DATE_FILTERS:
-            series = filtered[col].dropna()
-            if series.empty:
-                continue
-            dmin, dmax = series.min().date(), series.max().date()
-            if dmin == dmax:
-                continue
-            lo, hi = st.date_input(label, value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"filt_{col}")
-            if isinstance(lo, tuple):
-                lo, hi = lo
-            filtered = filtered[(filtered[col].dt.date.between(lo, hi)) | filtered[col].isna()]
+        with st.expander("🔢 Capacité, prix & notes"):
+            for label, col in NUMERIC_FILTERS:
+                series = filtered[col].dropna()
+                if series.empty:
+                    continue
+                vmin, vmax = float(series.min()), float(series.max())
+                if vmin == vmax:
+                    continue
+                lo, hi = st.slider(label, min_value=float(np.floor(vmin)), max_value=float(np.ceil(vmax)),
+                                    value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{col}")
+                filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
 
-    with st.sidebar.expander("🔍 Recherche"):
-        search = st.text_input("Nom de l'hôtel contient...", "")
-        only_geo = st.checkbox("Afficher uniquement les hôtels géolocalisés", value=True)
-        if search:
-            filtered = filtered[filtered["Nom"].str.contains(search, case=False, na=False)]
-        if only_geo:
-            filtered = filtered[filtered["Géolocalisé"]]
+        with st.expander("📅 Dates"):
+            for label, col in DATE_FILTERS:
+                series = filtered[col].dropna()
+                if series.empty:
+                    continue
+                dmin, dmax = series.min().date(), series.max().date()
+                if dmin == dmax:
+                    continue
+                lo, hi = st.date_input(label, value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"filt_{col}")
+                if isinstance(lo, tuple):
+                    lo, hi = lo
+                filtered = filtered[(filtered[col].dt.date.between(lo, hi)) | filtered[col].isna()]
+
+        with st.expander("🔎 Recherche"):
+            search = st.text_input("Nom de l'hôtel contient...", "")
+            only_geo = st.checkbox("Afficher uniquement les hôtels géolocalisés", value=True)
+            if search:
+                filtered = filtered[filtered["Nom"].str.contains(search, case=False, na=False)]
+            if only_geo:
+                filtered = filtered[filtered["Géolocalisé"]]
 
     return filtered
 
 
-def sidebar_layers(pois_df: pd.DataFrame):
-    st.sidebar.header("🗂️ Couches")
-    show_hotels = st.sidebar.checkbox("Hôtels", value=True)
-    poi_types = sorted(pois_df["Type"].dropna().unique().tolist())
-    active_poi_types = []
-    if poi_types:
-        st.sidebar.caption("Points d'intérêt")
-        for t in poi_types:
-            if st.sidebar.checkbox(f"　{t}", value=True, key=f"poi_{t}"):
-                active_poi_types.append(t)
+def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
+    with st.sidebar.container(border=True):
+        st.markdown("### 🗺️ Carte")
 
-    st.sidebar.header("🎨 Style des bulles")
-    color_label = st.sidebar.selectbox("Couleur selon", list(COLOR_MODES.keys()), index=0)
-    st.sidebar.caption("Taille des bulles = capacité (nombre de chambres)")
-    return show_hotels, active_poi_types, COLOR_MODES[color_label], color_label
+        basemap_choice = st.selectbox("Fond de carte", list(BASEMAPS.keys()), index=0)
+
+        st.markdown("**Couches**")
+        show_hotels = st.checkbox("Hôtels", value=True)
+        poi_types = sorted(pois_df["Type"].dropna().unique().tolist())
+        active_poi_types = []
+        if poi_types:
+            st.caption("Points d'intérêt")
+            for t in poi_types:
+                if st.checkbox(f"　{t}", value=True, key=f"poi_{t}"):
+                    active_poi_types.append(t)
+
+        st.markdown("**Style des bulles**")
+        color_label = st.selectbox("Couleur selon", list(COLOR_MODES.keys()), index=0)
+        color_mode = COLOR_MODES[color_label]
+        st.caption("Taille des bulles = capacité (nombre de chambres)")
+
+        if color_mode == "stars":
+            values = sorted(v for v in hotels_df["Étoiles (estimées)"].dropna().unique().tolist())
+        elif color_mode in hotels_df.columns:
+            values = sorted(hotels_df[color_mode].dropna().unique().tolist())
+        else:
+            values = []
+        color_map = get_color_map(color_mode, values)
+
+        with st.expander("🎨 Personnaliser les couleurs"):
+            if values:
+                for v in values:
+                    label = f"{int(v)} ★" if color_mode == "stars" else str(v)
+                    color_map[v] = st.color_picker(label, color_map.get(v, DEFAULT_COLOR), key=f"cp_{color_mode}_{v}")
+            else:
+                st.caption("Aucune valeur à colorer pour ce critère.")
+
+        st.markdown("**Infos au survol**")
+        tooltip_fields = st.multiselect(
+            "Champs affichés en survolant un hôtel", HOTEL_INFO_FIELDS,
+            default=DEFAULT_TOOLTIP_FIELDS, key="tooltip_fields",
+        )
+
+    return show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields
 
 
 def sidebar_distance_filter():
-    st.sidebar.header("📍 Filtre par distance")
-    st.sidebar.caption("Clique sur la carte pour poser un point de référence, puis ajuste le rayon.")
-    st.session_state["distance_filter_on"] = st.sidebar.checkbox(
-        "Activer le filtre par distance", value=st.session_state["distance_filter_on"]
-    )
-    st.session_state["radius_km"] = st.sidebar.slider(
-        "Rayon (km)", min_value=1, max_value=150, value=st.session_state["radius_km"]
-    )
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        lat_in = st.number_input("Latitude", value=float(st.session_state["ref_point"][0]) if st.session_state["ref_point"] else 0.0, format="%.6f")
-    with col2:
-        lon_in = st.number_input("Longitude", value=float(st.session_state["ref_point"][1]) if st.session_state["ref_point"] else 0.0, format="%.6f")
-    apply_manual = st.sidebar.button("Utiliser ces coordonnées")
-    if apply_manual and (lat_in != 0.0 or lon_in != 0.0):
-        st.session_state["ref_point"] = (lat_in, lon_in)
-    if st.sidebar.button("Réinitialiser le point"):
-        st.session_state["ref_point"] = None
-        st.session_state["distance_filter_on"] = False
+    with st.sidebar.container(border=True):
+        st.markdown("### 📍 Filtre par distance")
+        st.caption("Clique sur la carte pour poser un point de référence, puis ajuste le rayon.")
+        st.session_state["distance_filter_on"] = st.checkbox(
+            "Activer le filtre par distance", value=st.session_state["distance_filter_on"]
+        )
+        st.session_state["radius_km"] = st.slider(
+            "Rayon (km)", min_value=1, max_value=150, value=st.session_state["radius_km"]
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            lat_in = st.number_input("Latitude", value=float(st.session_state["ref_point"][0]) if st.session_state["ref_point"] else 0.0, format="%.6f")
+        with col2:
+            lon_in = st.number_input("Longitude", value=float(st.session_state["ref_point"][1]) if st.session_state["ref_point"] else 0.0, format="%.6f")
+        apply_manual = st.button("Utiliser ces coordonnées")
+        if apply_manual and (lat_in != 0.0 or lon_in != 0.0):
+            st.session_state["ref_point"] = (lat_in, lon_in)
+        if st.button("Réinitialiser le point"):
+            st.session_state["ref_point"] = None
+            st.session_state["distance_filter_on"] = False
 
 
-def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode):
+def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields):
     center = [31.7917, -7.0926]
     zoom = 5.4
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
     b = bounds_for(all_points) if not all_points.empty else None
 
+    basemap = BASEMAPS.get(basemap_choice, BASEMAPS["Clair épuré (recommandé)"])
     m = folium.Map(location=center, zoom_start=zoom, tiles=None, prefer_canvas=True)
-    folium.TileLayer(
-        tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        attr='&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        name="Fond clair (par défaut)",
-        show=True,
-    ).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="OpenStreetMap (standard)", show=False).add_to(m)
-    folium.TileLayer(
-        tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-        attr="OpenTopoMap", name="Relief", show=False,
-    ).add_to(m)
-
-    palette_map = {}
-    if color_mode not in ("stars",) and color_mode in hotels_df.columns:
-        palette_map = build_palette_map(hotels_df[color_mode].dropna().unique().tolist())
+    if basemap["attr"]:
+        folium.TileLayer(tiles=basemap["tiles"], attr=basemap["attr"], name=basemap_choice).add_to(m)
+    else:
+        folium.TileLayer(tiles=basemap["tiles"], name=basemap_choice).add_to(m)
 
     if show_hotels and not hotels_df.empty:
         cap_series = hotels_df["Capacité act (cha.)"].dropna()
@@ -269,10 +357,9 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode):
             if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
                 continue
             radius = scale_radius(row["Capacité act (cha.)"], cap_min, cap_max)
-            if color_mode == "stars":
-                color = color_for_star(row["Étoiles (estimées)"])
-            else:
-                color = color_for_category(row.get(color_mode), palette_map)
+            cat_value = row["Étoiles (estimées)"] if color_mode == "stars" else row.get(color_mode)
+            has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
+            color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
 
             popup_html = f"""
             <b>{row['Nom']}</b><br>
@@ -295,7 +382,7 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode):
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.75,
-                tooltip=row["Nom"],
+                tooltip=folium.Tooltip(build_tooltip_html(row, tooltip_fields), sticky=True),
                 popup=folium.Popup(popup_html, max_width=280),
             ).add_to(hotel_layer)
         hotel_layer.add_to(m)
@@ -343,7 +430,7 @@ def main():
     )
 
     hotels_df, pois_df = sidebar_data_sources()
-    show_hotels, active_poi_types, color_mode, color_label = sidebar_layers(pois_df)
+    show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields = sidebar_map_settings(hotels_df, pois_df)
     filtered_df = sidebar_filters(hotels_df)
     sidebar_distance_filter()
 
@@ -364,10 +451,10 @@ def main():
     kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
     kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
 
-    map_col, table_col = st.columns([2.1, 1])
+    map_col, table_col = st.columns([2.6, 1])
 
     with map_col:
-        fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode)
+        fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields)
         map_state = st_folium(fmap, use_container_width=True, height=640, key="main_map",
                                returned_objects=["last_clicked"])
         if map_state and map_state.get("last_clicked"):
@@ -378,12 +465,10 @@ def main():
                 st.rerun()
 
         st.markdown(f"**Légende couleur : {color_label}**")
-        if color_mode == "stars":
-            legend_items = [(f"{k} ★", v) for k, v in
-                             {1: "#b71c1c", 2: "#e65100", 3: "#f9a825", 4: "#2e7d32", 5: "#0d47a1"}.items()]
-        else:
-            pm = build_palette_map(hotels_df[color_mode].dropna().unique().tolist()) if color_mode in hotels_df.columns else {}
-            legend_items = list(pm.items())
+        legend_items = [
+            (f"{int(v)} ★" if color_mode == "stars" else str(v), c)
+            for v, c in sorted(color_map.items(), key=lambda kv: str(kv[0]))
+        ]
         legend_html = " &nbsp; ".join(
             f'<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:{c};margin-right:4px;"></span>{lbl}'
             for lbl, c in legend_items
@@ -391,14 +476,14 @@ def main():
         st.markdown(legend_html, unsafe_allow_html=True)
 
     with table_col:
-        st.subheader("📊 Répartition par ville hôte")
+        st.markdown("**📊 Répartition par ville hôte**")
         if not filtered_df.empty:
             by_city = filtered_df.groupby("Ville hôte", dropna=True).agg(
                 Hôtels=("ID", "count"),
                 Capacité=("Capacité act (cha.)", "sum"),
             ).sort_values("Capacité", ascending=False)
-            st.bar_chart(by_city["Capacité"])
-            st.dataframe(by_city, width="stretch")
+            st.bar_chart(by_city["Capacité"], height=180)
+            st.dataframe(by_city, width="stretch", height=160)
         else:
             st.info("Aucun hôtel ne correspond aux filtres actuels.")
 
@@ -429,9 +514,10 @@ def main():
     with st.expander("ℹ️ À propos de cet outil / prochaines étapes"):
         st.markdown(
             """
-            - **Couches** : active/désactive les hôtels et chaque type de point d'intérêt dans la barre latérale, ou directement via le sélecteur de couches en haut à droite de la carte.
-            - **Filtres** : tous les champs du fichier hôtels sont filtrables (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
-            - **Bulles** : taille = capacité (nb chambres), couleur = critère choisi dans la barre latérale (étoiles, statut, ville hôte, signature, risque, visite).
+            - **Carte** : choisis le fond de carte (clair, très épuré, sombre, standard, relief) et active/désactive les hôtels et chaque type de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale.
+            - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
+            - **Bulles** : taille = capacité (nb chambres) ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
+            - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète).
             - **Filtre par distance** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre et ajuste le rayon en km. Le calcul actuel est à vol d'oiseau ; un calcul en **temps de trajet réel** (via un moteur de routage type OSRM) pourra être ajouté en connectant une API de routage.
             - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
             """
