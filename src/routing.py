@@ -6,6 +6,7 @@ public OSRM (gratuit, mais sans garantie de disponibilité). Dans les deux
 cas, les résultats sont mis en cache sur disque pour ne jamais recalculer
 deux fois le même trajet."""
 import json
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -20,10 +21,13 @@ REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; wc2030-map/1.0; +stre
 
 OSRM_BASE_URL = "https://router.project-osrm.org"
 OSRM_CHUNK_SIZE = 90  # nombre de destinations par appel, pour rester sous les limites du serveur public
+OSRM_REQUEST_DELAY = 1.0  # secondes entre deux appels, par précaution sur le service public
 
 ORS_URL = "https://api.openrouteservice.org/v2/matrix/{profile}"
 ORS_PROFILES = {"driving": "driving-car"}
 ORS_CHUNK_SIZE = 400  # destinations par appel (marge sous la limite habituelle de la matrice ORS)
+ORS_REQUEST_DELAY = 2.0  # secondes entre deux appels, pour rester sous la limite de débit du compte gratuit (~30/min)
+ORS_RATE_LIMIT_BACKOFF = 20.0  # pause supplémentaire après un 429, pour laisser la fenêtre de débit se réinitialiser
 
 
 def _get_ors_api_key():
@@ -130,6 +134,10 @@ def _chunk_size() -> int:
     return ORS_CHUNK_SIZE if using_ors() else OSRM_CHUNK_SIZE
 
 
+def _request_delay() -> float:
+    return ORS_REQUEST_DELAY if using_ors() else OSRM_REQUEST_DELAY
+
+
 def get_travel_times_minutes(origin, hotels_df: pd.DataFrame, id_col="ID",
                               lat_col="Latitude", lon_col="Longitude", profile="driving"):
     """Retourne (dict {ID hôtel: minutes ou None}, dernier message d'erreur
@@ -148,6 +156,7 @@ def get_travel_times_minutes(origin, hotels_df: pd.DataFrame, id_col="ID",
     newly_cached = False
     last_error = None
     chunk_size = _chunk_size()
+    delay = _request_delay()
     for i in range(0, len(missing), chunk_size):
         chunk = missing[i:i + chunk_size]
         durations, error = _fetch_durations_minutes(origin, [(lat, lon) for _, lat, lon in chunk], profile=profile)
@@ -161,6 +170,15 @@ def get_travel_times_minutes(origin, hotels_df: pd.DataFrame, id_col="ID",
             if minutes is not None:
                 bucket[hid] = minutes
                 newly_cached = True
+        # Throttling : on espace toujours les appels réseau (même en fin de
+        # boucle, car d'autres appels à cette fonction peuvent suivre
+        # immédiatement, ex. le POI suivant dans precompute_travel_times.py),
+        # avec une pause plus longue après un 429 pour laisser la limite de
+        # débit du compte se réinitialiser.
+        if error and "429" in error:
+            time.sleep(ORS_RATE_LIMIT_BACKOFF)
+        else:
+            time.sleep(delay)
 
     if newly_cached:
         cache[okey] = bucket
