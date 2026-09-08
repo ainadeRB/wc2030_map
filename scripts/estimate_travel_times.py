@@ -44,6 +44,18 @@ from src.routing import CACHE_PATH, ESTIMATES_PATH, _load_cache, _origin_key  # 
 MIN_PLAUSIBLE_SPEED_KMH = 2.0
 MAX_PLAUSIBLE_SPEED_KMH = 130.0
 
+# On ne calibre que sur des trajets à distance "raisonnable" (proche de ce
+# que le filtre de l'app utilise réellement, rayon max 150 km) : mélanger
+# des trajets courts (ville) et très longs (autoroute, des centaines de km)
+# dans une même droite tire l'ordonnée à l'origine vers le haut de façon
+# irréaliste, précisément dans la plage de distance qui compte le plus.
+MAX_TRAINING_DISTANCE_KM = 150.0
+
+# Filet de sécurité : une ordonnée à l'origine au-delà de ce seuil n'est pas
+# crédible (temps pour une distance ~0), on la plafonne et on ne réajuste
+# que la pente sur cette base plutôt que de garder un modèle absurde.
+MAX_PLAUSIBLE_INTERCEPT_MIN = 10.0
+
 # Utilisé uniquement si aucune vraie donnée n'est disponible pour calibrer
 # (repli générique, à affiner dès que le premier vrai calcul est disponible).
 FALLBACK_INTERCEPT_MIN = 5.0
@@ -73,7 +85,7 @@ def build_training_set(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
             if minutes is None:
                 continue
             dist = haversine_km(lat, lon, hotel["Latitude"], hotel["Longitude"])
-            if dist <= 0:
+            if dist <= 0 or dist > MAX_TRAINING_DISTANCE_KM:
                 continue
             speed = dist / (minutes / 60)
             if not (MIN_PLAUSIBLE_SPEED_KMH <= speed <= MAX_PLAUSIBLE_SPEED_KMH):
@@ -88,14 +100,24 @@ def build_training_set(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
 
 def fit_model(distances: np.ndarray, minutes: np.ndarray):
     """Régression linéaire simple minutes ≈ a + b*distance_km. Retourne
-    (a, b, r2). Bornes de sécurité : a >= 0, b > 0 (une vitesse positive)."""
+    (a, b, r2, capped). Bornes de sécurité : a >= 0, b > 0 (une vitesse
+    positive). Si l'ordonnée à l'origine dépasse
+    MAX_PLAUSIBLE_INTERCEPT_MIN (temps irréaliste pour une distance ~0),
+    elle est plafonnée et seule la pente est réajustée sur cette base
+    (droite forcée à passer par (0, a_plafonné)), plutôt que de garder un
+    modèle qui prédit un temps minimum absurde pour les trajets courts."""
     b, a = np.polyfit(distances, minutes, 1)
     a, b = max(0.0, a), max(0.3, b)
+    capped = False
+    if a > MAX_PLAUSIBLE_INTERCEPT_MIN:
+        a = MAX_PLAUSIBLE_INTERCEPT_MIN
+        b = max(0.3, float(np.sum(distances * (minutes - a)) / np.sum(distances ** 2)))
+        capped = True
     predicted = a + b * distances
     ss_res = float(np.sum((minutes - predicted) ** 2))
     ss_tot = float(np.sum((minutes - minutes.mean()) ** 2))
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    return a, b, r2
+    return a, b, r2, capped
 
 
 def main():
@@ -123,16 +145,21 @@ def main():
     distances, minutes, known_pois = build_training_set(geolocated, pois, cache)
 
     if len(distances) >= 20:
-        a, b, r2 = fit_model(distances, minutes)
+        a, b, r2, capped = fit_model(distances, minutes)
         speed_kmh = 60 / b
         print(
-            f"\nCalibration à partir de {len(distances):,} paires réelles connues, "
+            f"\nCalibration à partir de {len(distances):,} paires réelles connues (≤ {MAX_TRAINING_DISTANCE_KM:.0f} km), "
             f"sur {len(known_pois)} point(s) d'intérêt déjà calculé(s) :".replace(",", " ")
         )
         for nom, n in known_pois:
             print(f"  - {nom} : {n} paire(s)")
         print(f"\nModèle : temps (min) ≈ {a:.1f} + {b:.2f} × distance (km)  "
               f"[vitesse implicite ≈ {speed_kmh:.0f} km/h, R² = {r2:.2f}]")
+        if capped:
+            print(
+                f"⚠️ L'ordonnée à l'origine calculée dépassait {MAX_PLAUSIBLE_INTERCEPT_MIN:.0f} min "
+                f"(irréaliste pour une distance ~0) — plafonnée à {a:.1f} min, pente réajustée en conséquence."
+            )
     else:
         a, b = FALLBACK_INTERCEPT_MIN, 60 / FALLBACK_SPEED_KMH
         print(

@@ -226,9 +226,15 @@ python scripts/estimate_travel_times.py
 ```
 
 Le script calibre un modèle simple (temps ≈ ordonnée à l'origine + pente ×
-distance à vol d'oiseau) sur toutes les paires hôtel/POI déjà réellement
-mesurées dans `data/travel_time_cache.json`, puis l'applique pour estimer
-tout ce qui manque. Les estimations vont dans un fichier **séparé**,
+distance à vol d'oiseau) sur les paires hôtel/POI déjà réellement mesurées
+dans `data/travel_time_cache.json` (limité aux paires à ≤ 150 km, la plage
+réellement utilisée par le filtre de l'app — mélanger trajets courts en
+ville et longs trajets autoroutiers dans une même droite fausse surtout la
+prédiction sur les distances courtes, justement celles qui comptent le
+plus), puis l'applique pour estimer tout ce qui manque. Une ordonnée à
+l'origine qui resterait malgré tout irréaliste (> 10 min, soit le temps
+prédit pour une distance quasi nulle) est plafonnée automatiquement. Les
+estimations vont dans un fichier **séparé**,
 `data/travel_time_estimates.json` — jamais dans le cache réel :
 `precompute_travel_times.py` l'ignore complètement et continue de chercher
 de vraies valeurs pour tout ce qui manque quand le quota se renouvelle.
