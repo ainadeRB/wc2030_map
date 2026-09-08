@@ -396,22 +396,25 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
 
 def sidebar_distance_filter():
     with st.sidebar.container(border=True):
-        st.markdown("### 📍 Filtre par distance")
-        st.caption("Clique sur la carte pour poser un point de référence, puis ajuste le rayon.")
+        st.markdown("### 📍 Distance / Temps de trajet")
+        st.caption("Clique sur la carte pour poser un point de référence.")
         st.session_state["distance_filter_on"] = st.checkbox(
-            "Activer le filtre par distance", value=st.session_state["distance_filter_on"]
+            "Activer le filtre", value=st.session_state["distance_filter_on"]
         )
-        st.session_state["radius_km"] = st.slider(
-            "Rayon de recherche (km, vol d'oiseau)", min_value=1, max_value=150, value=st.session_state["radius_km"]
-        )
-        st.caption("Pré-filtre toujours appliqué en premier (borne aussi la zone considérée en mode temps de trajet).")
 
         st.session_state["distance_mode"] = st.radio(
             "Filtrer selon", ["Distance (vol d'oiseau)", "Temps de trajet (voiture)"],
             index=["Distance (vol d'oiseau)", "Temps de trajet (voiture)"].index(st.session_state["distance_mode"]),
         )
+        is_travel_time = st.session_state["distance_mode"] == "Temps de trajet (voiture)"
 
-        if st.session_state["distance_mode"] == "Temps de trajet (voiture)":
+        st.session_state["radius_km"] = st.slider(
+            "Rayon de recherche (km, vol d'oiseau)" if is_travel_time else "Rayon (km)",
+            min_value=1, max_value=150, value=st.session_state["radius_km"],
+        )
+        if is_travel_time:
+            st.caption("Pré-filtre toujours appliqué en premier, pour ne calculer le temps de trajet que sur une zone raisonnable.")
+
             st.session_state["max_travel_minutes"] = st.slider(
                 "Temps de trajet max (minutes)", min_value=5, max_value=180,
                 value=st.session_state["max_travel_minutes"], step=5,
@@ -537,8 +540,8 @@ def main():
         filtered_df = filtered_df[filtered_df["Distance (km)"] <= st.session_state["radius_km"]]
 
         if st.session_state["distance_mode"] == "Temps de trajet (voiture)" and not filtered_df.empty:
-            with st.spinner("Calcul des temps de trajet (mise en cache pour les prochaines fois)..."):
-                travel_times = get_travel_times_minutes((lat0, lon0), filtered_df)
+            with st.spinner(f"Calcul du temps de trajet pour {len(filtered_df)} hôtel(s) (mise en cache pour les prochaines fois)..."):
+                travel_times, travel_error = get_travel_times_minutes((lat0, lon0), filtered_df)
             raw_minutes = pd.to_numeric(
                 pd.Series([travel_times.get(str(hid)) for hid in filtered_df["ID"]], index=filtered_df.index),
                 errors="coerce",
@@ -549,8 +552,13 @@ def main():
                 effective_minutes = raw_minutes
             filtered_df = filtered_df.assign(**{"Temps de trajet (min)": effective_minutes.round(1)})
             if raw_minutes.notna().sum() == 0:
-                st.warning("⚠️ Impossible de joindre le service de calcul de temps de trajet pour le moment — vérifie ta connexion internet. Le filtre par distance à vol d'oiseau reste actif.")
+                st.warning(
+                    f"⚠️ Impossible d'obtenir les temps de trajet pour le moment "
+                    f"({travel_error or 'raison inconnue'}). Le filtre par distance à vol d'oiseau reste actif."
+                )
             else:
+                if raw_minutes.isna().any():
+                    st.caption(f"ℹ️ Temps de trajet indisponible pour {int(raw_minutes.isna().sum())} hôtel(s) (exclus du filtre) — {travel_error or ''}")
                 filtered_df = filtered_df[filtered_df["Temps de trajet (min)"] <= st.session_state["max_travel_minutes"]]
 
     n_total = len(hotels_df)
@@ -617,7 +625,7 @@ def main():
             - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
             - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
-            - **Filtre par distance** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre et ajuste le rayon en km (vol d'oiseau, toujours appliqué en premier). Bascule sur "Temps de trajet (voiture)" pour filtrer sur un temps de trajet réel (calculé via un service de routage en ligne, mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable.
+            - **Distance / Temps de trajet** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre puis choisis "Distance (vol d'oiseau)" ou "Temps de trajet (voiture)". En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable.
             - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Aucune modification du fichier Excel n'est nécessaire.
             - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
             """
