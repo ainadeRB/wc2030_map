@@ -116,10 +116,6 @@ DATE_FILTERS = [
 REF_SOURCE_MANUAL = "Point choisi (clic sur la carte ou coordonnées)"
 REF_SOURCE_POI = "Point d'intérêt"
 
-# Nombre max de vignettes affichées dans la galerie du popup, au-delà on se
-# contente d'indiquer combien il en reste (éviter un popup démesuré).
-MAX_POPUP_PHOTOS = 12
-
 
 def init_state():
     st.session_state.setdefault("ref_point", None)
@@ -181,14 +177,38 @@ def format_field_value(field, val):
     return html_lib.escape(str(val))
 
 
+# Style commun forçant le retour à la ligne : Leaflet met par défaut les
+# tooltips en `white-space: nowrap` (une valeur très longue s'étire alors
+# hors de la carte au lieu de s'arrêter au bord de l'infobulle) et les popups
+# n'ont pas toujours de largeur garantie selon le navigateur. On enveloppe
+# tout le contenu dans un conteneur qui force la largeur max et la coupure
+# des mots trop longs, indépendamment du champ concerné.
+WRAP_STYLE = "max-width:230px;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;"
+
+
+def _main_photo_html(hotel_id, width, style):
+    """Vignette de la première photo de l'hôtel, ou None si aucune photo
+    n'existe ou n'a pas pu être chargée (fichier corrompu, format non
+    supporté...) — jamais d'exception propagée jusqu'à l'appelant, pour ne
+    jamais faire disparaître tout le marqueur à cause d'une seule photo."""
+    try:
+        photos = get_hotel_photos(hotel_id)
+    except Exception:
+        return None, 0
+    if not photos:
+        return None, 0
+    try:
+        uri = get_thumbnail_data_uri(photos[0], width)
+    except Exception:
+        return None, len(photos)
+    return f'<img src="{uri}" style="{style}">', len(photos)
+
+
 def build_tooltip_html(row, fields):
     parts = []
-    photos = get_hotel_photos(row.get("ID"))
-    if photos:
-        try:
-            parts.append(f'<img src="{get_thumbnail_data_uri(photos[0], 160)}" style="display:block;border-radius:4px;margin-bottom:4px;">')
-        except Exception:
-            pass
+    photo_html, _ = _main_photo_html(row.get("ID"), 160, "display:block;border-radius:4px;margin-bottom:4px;max-width:100%;")
+    if photo_html:
+        parts.append(photo_html)
 
     text_parts = []
     for field in fields:
@@ -199,7 +219,7 @@ def build_tooltip_html(row, fields):
         else:
             text_parts.append(f"{field} : {value_html}")
     parts.extend(text_parts or [f"<i>{MISSING_LABEL}</i>"])
-    return "<br>".join(parts)
+    return f'<div style="{WRAP_STYLE}">' + "<br>".join(parts) + "</div>"
 
 
 def build_popup_html(row):
@@ -208,28 +228,11 @@ def build_popup_html(row):
         return f"{val}{suffix}" if val is not None else f"<i>{MISSING_LABEL}</i>"
 
     lines = []
-    photos = get_hotel_photos(row.get("ID"))
-    if photos:
-        shown = photos[:MAX_POPUP_PHOTOS]
-        main_html = None
-        thumb_html = []
-        for i, photo in enumerate(shown):
-            try:
-                width = 320 if i == 0 else 90
-                uri = get_thumbnail_data_uri(photo, width)
-            except Exception:
-                continue
-            if i == 0:
-                main_html = f'<img src="{uri}" style="display:block;border-radius:4px;margin-bottom:4px;max-width:100%;">'
-            else:
-                thumb_html.append(f'<img src="{uri}" style="width:64px;height:64px;object-fit:cover;border-radius:4px;">')
-        gallery_html = (main_html or "") + (
-            f'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">{"".join(thumb_html)}</div>' if thumb_html else ""
-        )
-        if gallery_html:
-            lines.append(gallery_html)
-        if len(photos) > MAX_POPUP_PHOTOS:
-            lines.append(f'<span style="color:#666;font-size:0.85em;">+{len(photos) - MAX_POPUP_PHOTOS} autre(s) photo(s) dans data/photos/{row.get("ID")}/</span>')
+    photo_html, n_photos = _main_photo_html(row.get("ID"), 300, "display:block;border-radius:4px;margin-bottom:4px;max-width:100%;")
+    if photo_html:
+        lines.append(photo_html)
+        if n_photos > 1:
+            lines.append(f'<span style="color:#666;font-size:0.85em;">+{n_photos - 1} autre(s) photo(s) dans data/photos/{row.get("ID")}/</span>')
 
     lines += [
         f"<b>{format_field_value('Nom', row.get('Nom')) or MISSING_LABEL}</b>",
@@ -244,7 +247,7 @@ def build_popup_html(row):
         f"Risque : {fmt('Risque')}",
         f"Note Booking : {fmt('Note Booking')}",
     ]
-    return "<br>".join(lines)
+    return f'<div style="{WRAP_STYLE}">' + "<br>".join(lines) + "</div>"
 
 
 @st.cache_data(show_spinner=False)
@@ -572,7 +575,7 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
                 fill_color=color,
                 fill_opacity=0.75,
                 tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True),
-                popup=folium.Popup(popup_html, max_width=340),
+                popup=folium.Popup(popup_html, max_width=280),
             ).add_to(hotel_layer)
         hotel_layer.add_to(m)
 
