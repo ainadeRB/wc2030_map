@@ -1,0 +1,407 @@
+"""Coupe du Monde 2030 – Maroc : cartographie interactive des hôtels
+et points d'intérêt (stades, sites d'entraînement, aéroports...).
+
+Lancer avec : streamlit run app.py
+"""
+from io import BytesIO
+
+import folium
+import numpy as np
+import pandas as pd
+import streamlit as st
+from streamlit_folium import st_folium
+
+from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
+from src.geo import bounds_for, haversine_km
+from src.styling import (
+    build_palette_map,
+    color_for_category,
+    color_for_star,
+    hex_to_rgba,
+    scale_radius,
+    POI_TYPE_COLORS,
+    POI_TYPE_ICON,
+)
+
+st.set_page_config(page_title="WC2030 Maroc – Carte Hôtels", page_icon="🗺️", layout="wide")
+
+DATA_DIR = "data"
+DEFAULT_HOTELS = f"{DATA_DIR}/sample_hotels.xlsx"
+DEFAULT_POIS = f"{DATA_DIR}/sample_poi.xlsx"
+
+COLOR_MODES = {
+    "Nouveau classement assimilé (étoiles)": "stars",
+    "Nouveau Statut vérifié": "Nouveau Statut vérifié",
+    "Ville hôte": "Ville hôte",
+    "Signature": "Signature",
+    "Risque": "Risque",
+    "Visite": "Visite",
+}
+
+CATEGORICAL_FILTERS = [
+    ("Ville hôte", "Ville hôte"),
+    ("Ville", "Ville"),
+    ("Catégorie", "Catégorie"),
+    ("Nouveau classement assimilé", "Nouveau classement assimilé"),
+    ("Nouveau Statut vérifié", "Nouveau Statut vérifié"),
+    ("Propriétaire", "Propriétaire"),
+    ("Opérateur", "Opérateur"),
+    ("Signature Prop", "Signature Prop"),
+    ("Signature Op", "Signature Op"),
+    ("Signature global", "Signature"),
+    ("Risque", "Risque"),
+    ("Visite", "Visite"),
+]
+
+NUMERIC_FILTERS = [
+    ("Capacité (chambres)", "Capacité act (cha.)"),
+    ("Prix moyen chambre (PMC vérif)", "PMC vérif"),
+    ("Chambres allouées (total)", "#Chambres alloues total"),
+    ("Note Booking", "Note Booking"),
+]
+
+DATE_FILTERS = [
+    ("Date d'ouverture", "Date ouverture"),
+    ("Date dernière rénovation", "Date dernière réno"),
+    ("Date prochaine rénovation", "Date prochaine réno"),
+]
+
+
+def init_state():
+    st.session_state.setdefault("ref_point", None)
+    st.session_state.setdefault("radius_km", 15)
+    st.session_state.setdefault("distance_filter_on", False)
+
+
+def to_excel_bytes(df: pd.DataFrame) -> bytes:
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Hôtels filtrés")
+    return buffer.getvalue()
+
+
+@st.cache_data(show_spinner=False)
+def _cached_hotels(file_bytes_or_path, is_upload):
+    if is_upload:
+        return load_hotels(BytesIO(file_bytes_or_path))
+    return load_hotels(file_bytes_or_path)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_pois(file_bytes_or_path, is_upload):
+    if is_upload:
+        return load_pois(BytesIO(file_bytes_or_path))
+    return load_pois(file_bytes_or_path)
+
+
+def sidebar_data_sources():
+    st.sidebar.header("📂 Données")
+    hotel_file = st.sidebar.file_uploader("Fichier hôtels (Excel)", type=["xlsx", "xls"], key="hotel_upload")
+    poi_file = st.sidebar.file_uploader("Fichier points d'intérêt (Excel)", type=["xlsx", "xls"], key="poi_upload")
+
+    hotels_df = _cached_hotels(hotel_file.getvalue(), True) if hotel_file else _cached_hotels(DEFAULT_HOTELS, False)
+    if not hotel_file:
+        st.sidebar.caption("ℹ️ Données de démonstration chargées (`data/sample_hotels.xlsx`). Dépose ton fichier réel ci-dessus pour le remplacer.")
+
+    try:
+        pois_df = _cached_pois(poi_file.getvalue(), True) if poi_file else _cached_pois(DEFAULT_POIS, False)
+        if not poi_file:
+            st.sidebar.caption("ℹ️ POI de démonstration chargés (`data/sample_poi.xlsx`).")
+    except Exception:
+        pois_df = pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
+        st.sidebar.warning("Impossible de lire le fichier de points d'intérêt.")
+
+    return hotels_df, pois_df
+
+
+def sidebar_filters(df: pd.DataFrame):
+    filtered = df.copy()
+
+    with st.sidebar.expander("🏙️ Localisation & classification", expanded=True):
+        for label, col in CATEGORICAL_FILTERS[:5]:
+            options = sorted(filtered[col].dropna().unique().tolist())
+            if not options:
+                continue
+            chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
+            if chosen:
+                filtered = filtered[filtered[col].isin(chosen)]
+
+    with st.sidebar.expander("✍️ Parties prenantes & statut"):
+        for label, col in CATEGORICAL_FILTERS[5:]:
+            options = sorted(filtered[col].dropna().unique().tolist())
+            if not options:
+                continue
+            chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
+            if chosen:
+                filtered = filtered[filtered[col].isin(chosen)]
+
+    with st.sidebar.expander("🔢 Capacité, prix & notes"):
+        for label, col in NUMERIC_FILTERS:
+            series = filtered[col].dropna()
+            if series.empty:
+                continue
+            vmin, vmax = float(series.min()), float(series.max())
+            if vmin == vmax:
+                continue
+            lo, hi = st.slider(label, min_value=float(np.floor(vmin)), max_value=float(np.ceil(vmax)),
+                                value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{col}")
+            filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
+
+    with st.sidebar.expander("📅 Dates"):
+        for label, col in DATE_FILTERS:
+            series = filtered[col].dropna()
+            if series.empty:
+                continue
+            dmin, dmax = series.min().date(), series.max().date()
+            if dmin == dmax:
+                continue
+            lo, hi = st.date_input(label, value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"filt_{col}")
+            if isinstance(lo, tuple):
+                lo, hi = lo
+            filtered = filtered[(filtered[col].dt.date.between(lo, hi)) | filtered[col].isna()]
+
+    with st.sidebar.expander("🔍 Recherche"):
+        search = st.text_input("Nom de l'hôtel contient...", "")
+        only_geo = st.checkbox("Afficher uniquement les hôtels géolocalisés", value=True)
+        if search:
+            filtered = filtered[filtered["Nom"].str.contains(search, case=False, na=False)]
+        if only_geo:
+            filtered = filtered[filtered["Géolocalisé"]]
+
+    return filtered
+
+
+def sidebar_layers(pois_df: pd.DataFrame):
+    st.sidebar.header("🗂️ Couches")
+    show_hotels = st.sidebar.checkbox("Hôtels", value=True)
+    poi_types = sorted(pois_df["Type"].dropna().unique().tolist())
+    active_poi_types = []
+    if poi_types:
+        st.sidebar.caption("Points d'intérêt")
+        for t in poi_types:
+            if st.sidebar.checkbox(f"　{t}", value=True, key=f"poi_{t}"):
+                active_poi_types.append(t)
+
+    st.sidebar.header("🎨 Style des bulles")
+    color_label = st.sidebar.selectbox("Couleur selon", list(COLOR_MODES.keys()), index=0)
+    st.sidebar.caption("Taille des bulles = capacité (nombre de chambres)")
+    return show_hotels, active_poi_types, COLOR_MODES[color_label], color_label
+
+
+def sidebar_distance_filter():
+    st.sidebar.header("📍 Filtre par distance")
+    st.sidebar.caption("Clique sur la carte pour poser un point de référence, puis ajuste le rayon.")
+    st.session_state["distance_filter_on"] = st.sidebar.checkbox(
+        "Activer le filtre par distance", value=st.session_state["distance_filter_on"]
+    )
+    st.session_state["radius_km"] = st.sidebar.slider(
+        "Rayon (km)", min_value=1, max_value=150, value=st.session_state["radius_km"]
+    )
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        lat_in = st.number_input("Latitude", value=float(st.session_state["ref_point"][0]) if st.session_state["ref_point"] else 0.0, format="%.6f")
+    with col2:
+        lon_in = st.number_input("Longitude", value=float(st.session_state["ref_point"][1]) if st.session_state["ref_point"] else 0.0, format="%.6f")
+    apply_manual = st.sidebar.button("Utiliser ces coordonnées")
+    if apply_manual and (lat_in != 0.0 or lon_in != 0.0):
+        st.session_state["ref_point"] = (lat_in, lon_in)
+    if st.sidebar.button("Réinitialiser le point"):
+        st.session_state["ref_point"] = None
+        st.session_state["distance_filter_on"] = False
+
+
+def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode):
+    center = [31.7917, -7.0926]
+    zoom = 5.4
+    all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
+    b = bounds_for(all_points) if not all_points.empty else None
+
+    m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap", prefer_canvas=True)
+    folium.TileLayer(
+        tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        attr="OpenTopoMap", name="Relief",
+    ).add_to(m)
+
+    palette_map = {}
+    if color_mode not in ("stars",) and color_mode in hotels_df.columns:
+        palette_map = build_palette_map(hotels_df[color_mode].dropna().unique().tolist())
+
+    if show_hotels and not hotels_df.empty:
+        cap_series = hotels_df["Capacité act (cha.)"].dropna()
+        cap_min, cap_max = (cap_series.min(), cap_series.max()) if not cap_series.empty else (0, 1)
+        hotel_layer = folium.FeatureGroup(name="Hôtels", show=True)
+        for _, row in hotels_df.iterrows():
+            if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
+                continue
+            radius = scale_radius(row["Capacité act (cha.)"], cap_min, cap_max)
+            if color_mode == "stars":
+                color = color_for_star(row["Étoiles (estimées)"])
+            else:
+                color = color_for_category(row.get(color_mode), palette_map)
+
+            popup_html = f"""
+            <b>{row['Nom']}</b><br>
+            Ville hôte : {row['Ville hôte']}<br>
+            Catégorie : {row['Catégorie']}<br>
+            Classement : {row['Nouveau classement assimilé']}<br>
+            Statut : {row['Nouveau Statut vérifié']}<br>
+            Capacité : {row['Capacité act (cha.)']:.0f} ch.<br>
+            Chambres allouées : {row['#Chambres alloues total']:.0f}<br>
+            PMC : {row['PMC vérif']:.0f} MAD<br>
+            Signature : {row['Signature']}<br>
+            Risque : {row['Risque']}<br>
+            Note Booking : {row['Note Booking']}
+            """
+            folium.CircleMarker(
+                location=[row["Latitude"], row["Longitude"]],
+                radius=radius,
+                color=color,
+                weight=1.5,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.75,
+                tooltip=row["Nom"],
+                popup=folium.Popup(popup_html, max_width=280),
+            ).add_to(hotel_layer)
+        hotel_layer.add_to(m)
+
+    for poi_type in active_poi_types:
+        subset = pois_df[pois_df["Type"] == poi_type]
+        if subset.empty:
+            continue
+        layer = folium.FeatureGroup(name=poi_type, show=True)
+        color = POI_TYPE_COLORS.get(poi_type, "#333333")
+        icon = POI_TYPE_ICON.get(poi_type, "map-marker")
+        for _, row in subset.iterrows():
+            folium.Marker(
+                location=[row["Latitude"], row["Longitude"]],
+                tooltip=f"{row['Nom']} ({poi_type})",
+                icon=folium.Icon(color="lightgray", icon_color=color, icon=icon, prefix="fa"),
+            ).add_to(layer)
+        layer.add_to(m)
+
+    ref_point = st.session_state.get("ref_point")
+    if ref_point and st.session_state.get("distance_filter_on"):
+        radius_km = st.session_state["radius_km"]
+        folium.Marker(location=list(ref_point), icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+                       tooltip="Point de référence").add_to(m)
+        folium.Circle(location=list(ref_point), radius=radius_km * 1000, color="#d62728",
+                       fill=True, fill_opacity=0.05, weight=2).add_to(m)
+    elif ref_point:
+        folium.Marker(location=list(ref_point), icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+                       tooltip="Point de référence (clic)").add_to(m)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+
+    if b:
+        m.fit_bounds(b)
+
+    return m
+
+
+def main():
+    init_state()
+    st.title("🗺️ Coupe du Monde 2030 – Maroc — Cartographie Hôtels & Sites")
+    st.caption(
+        "Carte interactive type Kepler.gl : couches activables, filtres sur toutes les colonnes, "
+        "bulles proportionnelles à la capacité et colorées par qualité, filtre par distance en cliquant sur la carte."
+    )
+
+    hotels_df, pois_df = sidebar_data_sources()
+    show_hotels, active_poi_types, color_mode, color_label = sidebar_layers(pois_df)
+    filtered_df = sidebar_filters(hotels_df)
+    sidebar_distance_filter()
+
+    if st.session_state["distance_filter_on"] and st.session_state["ref_point"]:
+        lat0, lon0 = st.session_state["ref_point"]
+        dist = haversine_km(lat0, lon0, filtered_df["Latitude"].values, filtered_df["Longitude"].values)
+        filtered_df = filtered_df.assign(**{"Distance (km)": dist})
+        filtered_df = filtered_df[filtered_df["Distance (km)"] <= st.session_state["radius_km"]]
+
+    n_total = len(hotels_df)
+    n_geo = int(hotels_df["Géolocalisé"].sum())
+    n_shown = len(filtered_df)
+
+    kpi_cols = st.columns(5)
+    kpi_cols[0].metric("Hôtels (base)", f"{n_total}")
+    kpi_cols[1].metric("Géolocalisés", f"{n_geo}", help="Nombre d'hôtels avec coordonnées valides dans la base")
+    kpi_cols[2].metric("Hôtels affichés", f"{n_shown}")
+    kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
+    kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
+
+    map_col, table_col = st.columns([2.1, 1])
+
+    with map_col:
+        fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode)
+        map_state = st_folium(fmap, use_container_width=True, height=640, key="main_map",
+                               returned_objects=["last_clicked"])
+        if map_state and map_state.get("last_clicked"):
+            clicked = map_state["last_clicked"]
+            new_point = (clicked["lat"], clicked["lng"])
+            if new_point != st.session_state.get("ref_point"):
+                st.session_state["ref_point"] = new_point
+                st.rerun()
+
+        st.markdown(f"**Légende couleur : {color_label}**")
+        if color_mode == "stars":
+            legend_items = [(f"{k} ★", v) for k, v in
+                             {1: "#b71c1c", 2: "#e65100", 3: "#f9a825", 4: "#2e7d32", 5: "#0d47a1"}.items()]
+        else:
+            pm = build_palette_map(hotels_df[color_mode].dropna().unique().tolist()) if color_mode in hotels_df.columns else {}
+            legend_items = list(pm.items())
+        legend_html = " &nbsp; ".join(
+            f'<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:{c};margin-right:4px;"></span>{lbl}'
+            for lbl, c in legend_items
+        )
+        st.markdown(legend_html, unsafe_allow_html=True)
+
+    with table_col:
+        st.subheader("📊 Répartition par ville hôte")
+        if not filtered_df.empty:
+            by_city = filtered_df.groupby("Ville hôte", dropna=True).agg(
+                Hôtels=("ID", "count"),
+                Capacité=("Capacité act (cha.)", "sum"),
+            ).sort_values("Capacité", ascending=False)
+            st.bar_chart(by_city["Capacité"])
+            st.dataframe(by_city, width="stretch")
+        else:
+            st.info("Aucun hôtel ne correspond aux filtres actuels.")
+
+    st.subheader("📋 Liste des hôtels filtrés")
+    display_cols = [c for c in [
+        "ID", "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
+        "Nouveau Statut vérifié", "Capacité act (cha.)", "#Chambres alloues total",
+        "PMC vérif", "Signature", "Risque", "Visite", "Note Booking", "Distance (km)",
+    ] if c in filtered_df.columns]
+    st.dataframe(filtered_df[display_cols].sort_values(display_cols[0]), width="stretch", height=350)
+
+    dl_col1, dl_col2 = st.columns(2)
+    with dl_col1:
+        st.download_button(
+            "⬇️ Télécharger la sélection (Excel)",
+            data=to_excel_bytes(filtered_df[display_cols]),
+            file_name="hotels_filtres_wc2030.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with dl_col2:
+        st.download_button(
+            "⬇️ Télécharger la sélection (CSV)",
+            data=filtered_df[display_cols].to_csv(index=False).encode("utf-8-sig"),
+            file_name="hotels_filtres_wc2030.csv",
+            mime="text/csv",
+        )
+
+    with st.expander("ℹ️ À propos de cet outil / prochaines étapes"):
+        st.markdown(
+            """
+            - **Couches** : active/désactive les hôtels et chaque type de point d'intérêt dans la barre latérale, ou directement via le sélecteur de couches en haut à droite de la carte.
+            - **Filtres** : tous les champs du fichier hôtels sont filtrables (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
+            - **Bulles** : taille = capacité (nb chambres), couleur = critère choisi dans la barre latérale (étoiles, statut, ville hôte, signature, risque, visite).
+            - **Filtre par distance** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre et ajuste le rayon en km. Le calcul actuel est à vol d'oiseau ; un calcul en **temps de trajet réel** (via un moteur de routage type OSRM) pourra être ajouté en connectant une API de routage.
+            - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
+            """
+        )
+
+
+if __name__ == "__main__":
+    main()
