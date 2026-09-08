@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from folium.utilities import escape_backticks
+from jinja2 import Template
 from streamlit_folium import st_folium
 
 from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
@@ -66,6 +67,44 @@ BASEMAPS = {
         "max_native_zoom": 17, "max_zoom": 19,
     },
 }
+
+
+class _EstimateBanner(folium.MacroElement):
+    """Bandeau d'avertissement ajouté comme un vrai contrôle Leaflet (coin
+    "topright"), pas comme un <div> flottant par-dessus la carte : Leaflet
+    limite lui-même (via son propre CSS) les événements de souris à la seule
+    zone du contrôle, donc ça ne peut jamais bloquer le survol/clic des
+    bulles ailleurs sur la carte — contrairement à un <div
+    style="position:fixed"> ad hoc, dont le calcul de taille par le
+    navigateur peut être imprévisible selon le contexte."""
+
+    _template = Template(u"""
+        {% macro script(this, kwargs) %}
+        (function() {
+            var banner = L.control({position: "topright"});
+            banner.onAdd = function(map) {
+                var div = L.DomUtil.create("div");
+                div.innerHTML = {{ this.text|tojson }};
+                div.style.background = "#ffe066";
+                div.style.color = "#5c4400";
+                div.style.padding = "6px 12px";
+                div.style.marginTop = "6px";
+                div.style.borderRadius = "6px";
+                div.style.fontWeight = "600";
+                div.style.fontSize = "13px";
+                div.style.boxShadow = "0 1px 4px rgba(0,0,0,0.3)";
+                div.style.border = "1px solid #f0c419";
+                return div;
+            };
+            banner.addTo({{ this._parent.get_name() }});
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, text):
+        super().__init__()
+        self._name = "EstimateBanner"
+        self.text = text
 
 HOTEL_INFO_FIELDS = [
     "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
@@ -195,11 +234,20 @@ def _main_photo_html(hotel_id, width, style):
     return f'<img src="{uri}" style="{style}">', len(photos)
 
 
+# Largeur FIXE (pas max-width) du texte des infobulles/popups : Leaflet
+# positionne ces éléments en `position:absolute`/`fixed`, et pour ce type
+# d'élément, une largeur seulement "max" (auto en dessous) fait calculer au
+# navigateur une largeur "shrink-to-fit" — qui, combinée à un mot très long
+# sans espace, peut s'effondrer à la largeur d'un seul caractère (chaque
+# lettre sur sa propre ligne). Une largeur fixe élimine complètement ce
+# calcul et garantit un retour à la ligne normal, quelle que soit la
+# longueur du texte, sans jamais dépasser le bord de la carte.
+TOOLTIP_TEXT_WIDTH_PX = 220
+POPUP_TEXT_WIDTH_PX = 240
+
+
 def build_tooltip_html(row, fields):
-    parts = []
     photo_html, _ = _main_photo_html(row.get("ID"), 160, "display:block;border-radius:4px;margin-bottom:4px;")
-    if photo_html:
-        parts.append(photo_html)
 
     text_parts = []
     for field in fields:
@@ -209,8 +257,8 @@ def build_tooltip_html(row, fields):
             text_parts.insert(0, f"<b>{formatted or MISSING_LABEL}</b>")
         else:
             text_parts.append(f"{field} : {value_html}")
-    parts.extend(text_parts or [f"<i>{MISSING_LABEL}</i>"])
-    return "<br>".join(parts)
+    text_html = f'<div style="width:{TOOLTIP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;">' + "<br>".join(text_parts or [f"<i>{MISSING_LABEL}</i>"]) + "</div>"
+    return (photo_html or "") + text_html
 
 
 def build_popup_html(row):
@@ -219,7 +267,7 @@ def build_popup_html(row):
         return f"{val}{suffix}" if val is not None else f"<i>{MISSING_LABEL}</i>"
 
     lines = []
-    photo_html, n_photos = _main_photo_html(row.get("ID"), 320, "display:block;border-radius:4px;margin-bottom:6px;max-width:100%;")
+    photo_html, n_photos = _main_photo_html(row.get("ID"), POPUP_TEXT_WIDTH_PX, "display:block;border-radius:4px;margin-bottom:6px;max-width:100%;")
     if photo_html:
         lines.append(photo_html)
         if n_photos > 1:
@@ -238,7 +286,7 @@ def build_popup_html(row):
         f"Risque : {fmt('Risque')}",
         f"Note Booking : {fmt('Note Booking')}",
     ]
-    return "<br>".join(lines)
+    return f'<div style="width:{POPUP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;">' + "<br>".join(lines) + "</div>"
 
 
 @st.cache_data(show_spinner=False)
@@ -588,15 +636,8 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
         layer.add_to(m)
 
     if n_estimated:
-        banner_html = f'''
-        <div style="position:fixed; top:56px; right:10px; z-index:9999;
-                    background:#ffe066; color:#5c4400; padding:6px 12px;
-                    border-radius:6px; font-weight:600; font-size:13px;
-                    box-shadow:0 1px 4px rgba(0,0,0,0.3); border:1px solid #f0c419;">
-            ⚠️ Estimation interpolée ({n_estimated} hôtel(s)) — pas encore un vrai temps de trajet
-        </div>
-        '''
-        m.get_root().html.add_child(folium.Element(banner_html))
+        banner_text = f"⚠️ Estimation interpolée ({n_estimated} hôtel(s)) — pas encore un vrai temps de trajet"
+        _EstimateBanner(banner_text).add_to(m)
 
     ref_point = st.session_state.get("ref_point")
     if ref_point and st.session_state.get("distance_filter_on"):
