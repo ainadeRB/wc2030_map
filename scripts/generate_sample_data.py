@@ -92,22 +92,37 @@ STADIUMS = {
     "Tanger": ("Grand stade de Tanger", 35.74124449619057, -5.8580601954832785),
 }
 
-poi_rows = []
+# Un onglet par type de point d'intérêt, même structure que le fichier
+# réel du projet (BDD_Hebergement_Maroc__points_d_interet.xlsx).
+stades_rows, sites_rows, fan_rows, aeroports_rows, autres_rows = [], [], [], [], []
 for city, (lat0, lon0) in HOST_CITIES.items():
     stade_nom, stade_lat, stade_lon = STADIUMS[city]
-    poi_rows.append({"Nom": stade_nom, "Type": "Stade", "Ville": city,
-                      "Latitude": stade_lat, "Longitude": stade_lon})
-    poi_rows.append({"Nom": f"Aéroport de {city}", "Type": "Aéroport", "Ville": city,
-                      "Latitude": round(lat0 + np.random.normal(0.06, 0.02), 6),
-                      "Longitude": round(lon0 + np.random.normal(0.06, 0.02), 6)})
+    stades_rows.append({"Stade": stade_nom, "Latitude": stade_lat, "Longitude": stade_lon})
+
+    aeroports_rows.append({"Aéroport": f"Aéroport de {city}", "Ville": city,
+                            "Latitude": round(lat0 + np.random.normal(0.06, 0.02), 6),
+                            "Longitude": round(lon0 + np.random.normal(0.06, 0.02), 6)})
+
     for i in range(1, random.randint(2, 4)):
-        poi_rows.append({"Nom": f"Site d'entraînement {city} #{i}", "Type": "Site d'entraînement", "Ville": city,
-                          "Latitude": round(lat0 + np.random.normal(0, 0.03), 6),
-                          "Longitude": round(lon0 + np.random.normal(0, 0.03), 6)})
-    poi_rows.append({"Nom": f"Fan Zone {city}", "Type": "Fan Zone", "Ville": city,
+        sites_rows.append({"Site d'entraînement": f"Site d'entraînement {city} #{i}",
+                            "Type": random.choice(["Stade annexe", "Terrain municipal", "Centre sportif privé"]),
+                            "Latitude": round(lat0 + np.random.normal(0, 0.03), 6),
+                            "Longitude": round(lon0 + np.random.normal(0, 0.03), 6)})
+
+    fan_rows.append({"Fan Festival": f"Fan Festival {city}",
                       "Latitude": round(lat0 + np.random.normal(0, 0.015), 6),
                       "Longitude": round(lon0 + np.random.normal(0, 0.015), 6)})
 
-poi_df = pd.DataFrame(poi_rows)
-poi_df.to_excel(DATA_DIR / "sample_poi.xlsx", index=False)
-print(f"POI générés : {len(poi_df)} -> {DATA_DIR / 'sample_poi.xlsx'}")
+    autres_rows.append({"Autre point d'intérêt": f"Centre média {city}", "Ville": city,
+                         "Latitude": round(lat0 + np.random.normal(0, 0.02), 6),
+                         "Longitude": round(lon0 + np.random.normal(0, 0.02), 6)})
+
+with pd.ExcelWriter(DATA_DIR / "sample_poi.xlsx", engine="openpyxl") as writer:
+    pd.DataFrame(stades_rows).to_excel(writer, sheet_name="Stades", index=False)
+    pd.DataFrame(sites_rows).to_excel(writer, sheet_name="Sites d'entraînement", index=False)
+    pd.DataFrame(fan_rows).to_excel(writer, sheet_name="Fan Festival", index=False)
+    pd.DataFrame(aeroports_rows).to_excel(writer, sheet_name="Aéroports", index=False)
+    pd.DataFrame(autres_rows).to_excel(writer, sheet_name="Autres", index=False)
+
+n_poi = len(stades_rows) + len(sites_rows) + len(fan_rows) + len(aeroports_rows) + len(autres_rows)
+print(f"POI générés : {n_poi} (5 onglets) -> {DATA_DIR / 'sample_poi.xlsx'}")

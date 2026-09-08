@@ -81,28 +81,52 @@ def load_hotels(file_or_path) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner=False)
-def load_pois(file_or_path) -> pd.DataFrame:
-    df = pd.read_excel(file_or_path, dtype=str)
+def _load_poi_sheet(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
+    """Convertit un onglet du fichier POI (un type de point d'intérêt par
+    onglet, ex. 'Stades', 'Sites d'entraînement', 'Aéroports'...) au format
+    standard Nom/Type/Ville/Latitude/Longitude. Le nom de l'onglet définit
+    toujours le type (donc la couche affichée) ; la première colonne
+    "métier" (ex. 'Stade', 'Aéroport'...) devient le nom du point. Une
+    éventuelle colonne "Type" interne à l'onglet (ex. sous-catégorie d'un
+    site d'entraînement) est conservée comme simple attribut ("Sous-type"),
+    pas comme couche."""
     df.columns = [str(c).strip() for c in df.columns]
-
-    name_col = _find_col(df.columns, "Nom", "Name", "Site") or df.columns[0]
-    type_col = _find_col(df.columns, "Type", "Catégorie", "Category")
-    city_col = _find_col(df.columns, "Ville", "Ville hôte", "City")
     lat_col = _find_col(df.columns, "Latitude", "Lat")
     lon_col = _find_col(df.columns, "Longitude", "Lon", "Lng")
+    if not lat_col or not lon_col:
+        return pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
+
+    city_col = _find_col(df.columns, "Ville", "Ville hôte", "City")
+    inner_type_col = _find_col(df.columns, "Type", "Catégorie", "Category")
+    name_col = _find_col(df.columns, "Nom", "Name")
+    if not name_col:
+        remaining = [c for c in df.columns if c not in {lat_col, lon_col, city_col}]
+        name_col = remaining[0] if remaining else df.columns[0]
 
     out = pd.DataFrame()
-    out["Nom"] = df[name_col]
-    out["Type"] = df[type_col] if type_col else "Point d'intérêt"
+    out["Nom"] = df[name_col].astype(str).str.strip()
+    out["Type"] = sheet_name
     out["Ville"] = df[city_col] if city_col else np.nan
-    out["Latitude"] = pd.to_numeric(df[lat_col], errors="coerce") if lat_col else np.nan
-    out["Longitude"] = pd.to_numeric(df[lon_col], errors="coerce") if lon_col else np.nan
+    out["Latitude"] = pd.to_numeric(df[lat_col], errors="coerce")
+    out["Longitude"] = pd.to_numeric(df[lon_col], errors="coerce")
+    if inner_type_col:
+        out["Sous-type"] = df[inner_type_col]
 
-    extra_cols = [c for c in df.columns if c not in {name_col, type_col, city_col, lat_col, lon_col}]
+    extra_cols = [c for c in df.columns if c not in {name_col, lat_col, lon_col, city_col, inner_type_col}]
     for c in extra_cols:
         out[c] = df[c]
 
-    out["Type"] = out["Type"].fillna("Point d'intérêt").astype(str).str.strip()
-    out = out.dropna(subset=["Latitude", "Longitude"])
-    return out
+    return out.dropna(subset=["Latitude", "Longitude"])
+
+
+@st.cache_data(show_spinner=False)
+def load_pois(file_or_path) -> pd.DataFrame:
+    xls = pd.ExcelFile(file_or_path)
+    sheets = []
+    for sheet_name in xls.sheet_names:
+        raw = pd.read_excel(xls, sheet_name=sheet_name, dtype=str)
+        sheets.append(_load_poi_sheet(raw, sheet_name.strip()))
+
+    if not sheets:
+        return pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
+    return pd.concat(sheets, ignore_index=True)

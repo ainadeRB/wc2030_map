@@ -19,21 +19,22 @@ STAR_COLORS = {
 }
 DEFAULT_COLOR = "#616161"
 
+# Clés = noms des onglets du fichier POI (ce sont eux qui définissent les
+# couches). Une valeur par défaut ("Point d'intérêt"-like) s'applique à tout
+# type non listé ici (voir POI_TYPE_COLORS.get(...) / POI_TYPE_ICON.get(...)).
 POI_TYPE_COLORS = {
-    "Stade": "#c62828",
-    "Site d'entraînement": "#2e7d32",
-    "Aéroport": "#6a1b9a",
-    "Hôtel FIFA HQ": "#ef6c00",
-    "Fan Zone": "#00838f",
-    "Centre média (IBC)": "#37474f",
+    "Stades": "#c62828",
+    "Sites d'entraînement": "#2e7d32",
+    "Aéroports": "#6a1b9a",
+    "Fan Festival": "#00838f",
+    "Autres": "#616161",
 }
 POI_TYPE_ICON = {
-    "Stade": "flag",
-    "Site d'entraînement": "futbol-o",
-    "Aéroport": "plane",
-    "Hôtel FIFA HQ": "star",
-    "Fan Zone": "users",
-    "Centre média (IBC)": "video-camera",
+    "Stades": "flag",
+    "Sites d'entraînement": "futbol-o",
+    "Aéroports": "plane",
+    "Fan Festival": "users",
+    "Autres": "map-marker",
 }
 
 
