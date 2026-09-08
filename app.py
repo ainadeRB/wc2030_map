@@ -3,6 +3,7 @@ et points d'intérêt (stades, sites d'entraînement, aéroports...).
 
 Lancer avec : streamlit run app.py
 """
+import html as html_lib
 from io import BytesIO
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import folium
 import numpy as np
 import pandas as pd
 import streamlit as st
+from folium.utilities import escape_backticks
 from streamlit_folium import st_folium
 
 from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
@@ -161,7 +163,10 @@ def format_field_value(field, val):
         if field in ONE_DECIMAL_FIELDS:
             return f"{val:.1f}"
         return f"{val:,.0f}".replace(",", " ")
-    return str(val)
+    # Échappement HTML : les valeurs viennent d'un fichier Excel externe et
+    # peuvent contenir des caractères (<, >, &, guillemets, backtick...) qui
+    # casseraient le HTML/JS généré pour les infobulles si insérés tels quels.
+    return html_lib.escape(str(val))
 
 
 def build_tooltip_html(row, fields):
@@ -474,7 +479,7 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.75,
-                tooltip=folium.Tooltip(build_tooltip_html(row, tooltip_fields), sticky=True),
+                tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True),
                 popup=folium.Popup(popup_html, max_width=280),
             ).add_to(hotel_layer)
         hotel_layer.add_to(m)
@@ -487,9 +492,10 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
         color = POI_TYPE_COLORS.get(poi_type, "#333333")
         icon = POI_TYPE_ICON.get(poi_type, "map-marker")
         for _, row in subset.iterrows():
+            poi_tooltip = escape_backticks(html_lib.escape(f"{row['Nom']} ({poi_type})"))
             folium.Marker(
                 location=[row["Latitude"], row["Longitude"]],
-                tooltip=f"{row['Nom']} ({poi_type})",
+                tooltip=folium.Tooltip(poi_tooltip, sticky=True),
                 icon=folium.Icon(color="lightgray", icon_color=color, icon=icon, prefix="fa"),
             ).add_to(layer)
         layer.add_to(m)
