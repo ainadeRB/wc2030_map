@@ -82,20 +82,21 @@ hotels_df = pd.DataFrame(rows)
 hotels_df.to_excel(DATA_DIR / "sample_hotels.xlsx", index=False)
 print(f"Hôtels générés : {len(hotels_df)} -> {DATA_DIR / 'sample_hotels.xlsx'}")
 
+# Coordonnées réelles fournies par le projet (liste stades, 2026-09-08)
 STADIUMS = {
-    "Casablanca": "Grand Stade Hassan II",
-    "Rabat": "Stade Moulay Abdellah",
-    "Marrakech": "Stade de Marrakech",
-    "Tanger": "Stade Ibn Batouta",
-    "Agadir": "Stade Adrar",
-    "Fès": "Complexe Sportif de Fès",
+    "Casablanca": ("Stade Hassan II de Casablanca", 33.67779147950588, -7.27450079272941),
+    "Rabat": ("Stade Moulay Abdellah de Rabat", 33.96004305974307, -6.88896252707498),
+    "Fès": ("Grand stade de Fès", 34.003010375009445, -4.968945432727453),
+    "Agadir": ("Grand stade d'Agadir", 30.42771450030645, -9.540222217466452),
+    "Marrakech": ("Grand stade de Marrakech", 31.707163547581615, -7.980277542706977),
+    "Tanger": ("Grand stade de Tanger", 35.74124449619057, -5.8580601954832785),
 }
 
 poi_rows = []
 for city, (lat0, lon0) in HOST_CITIES.items():
-    poi_rows.append({"Nom": STADIUMS[city], "Type": "Stade", "Ville": city,
-                      "Latitude": round(lat0 + np.random.normal(0, 0.01), 6),
-                      "Longitude": round(lon0 + np.random.normal(0, 0.01), 6)})
+    stade_nom, stade_lat, stade_lon = STADIUMS[city]
+    poi_rows.append({"Nom": stade_nom, "Type": "Stade", "Ville": city,
+                      "Latitude": stade_lat, "Longitude": stade_lon})
     poi_rows.append({"Nom": f"Aéroport de {city}", "Type": "Aéroport", "Ville": city,
                       "Latitude": round(lat0 + np.random.normal(0.06, 0.02), 6),
                       "Longitude": round(lon0 + np.random.normal(0.06, 0.02), 6)})
