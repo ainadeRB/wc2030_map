@@ -78,6 +78,15 @@ def load_hotels(file_or_path) -> pd.DataFrame:
                 "Signature Op", "Signature", "Risque", "Visite", "ID"]:
         df[col] = df[col].astype(str).str.strip().replace({"nan": np.nan, "None": np.nan, "": np.nan})
 
+    # Doublons d'ID : on garde la ligne géolocalisée en priorité (un ID avec
+    # une ligne vide + une ligne renseignée ne doit pas perdre la localisation).
+    if df["ID"].notna().any():
+        df = (
+            df.sort_values("Géolocalisé", ascending=False, kind="stable")
+            .drop_duplicates(subset="ID", keep="first")
+            .sort_index()
+        )
+
     return df
 
 
@@ -98,9 +107,10 @@ def _load_poi_sheet(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
 
     city_col = _find_col(df.columns, "Ville", "Ville hôte", "City")
     inner_type_col = _find_col(df.columns, "Type", "Catégorie", "Category")
+    id_col = _find_col(df.columns, "ID", "Id")
     name_col = _find_col(df.columns, "Nom", "Name")
     if not name_col:
-        remaining = [c for c in df.columns if c not in {lat_col, lon_col, city_col}]
+        remaining = [c for c in df.columns if c not in {lat_col, lon_col, city_col, id_col}]
         name_col = remaining[0] if remaining else df.columns[0]
 
     out = pd.DataFrame()

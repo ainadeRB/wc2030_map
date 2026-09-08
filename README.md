@@ -149,6 +149,39 @@ est détectée, l'app bascule automatiquement sur OpenRouteService (le bandeau
 "Service de routage actif" dans la barre latérale confirme lequel est
 utilisé) ; sans clé, elle continue de fonctionner avec OSRM.
 
+### Précalculer tous les trajets hôtels × points d'intérêt
+
+Pour ne plus jamais attendre un calcul au moment du filtrage, on peut
+précalculer d'un coup le temps de trajet entre **chaque** hôtel géolocalisé
+et **chaque** point d'intérêt :
+
+```bash
+python scripts/precompute_travel_times.py
+```
+
+Par défaut, le script lit `data/hotels.xlsx` et `data/poi.xlsx` (les mêmes
+fichiers que l'app charge) et remplit `data/travel_time_cache.json`. Une
+fois terminé, choisir un point d'intérêt dans le filtre "Temps de trajet"
+devient instantané pour n'importe quel hôtel présent dans le cache — aucun
+appel réseau au moment du filtrage.
+
+- **Sans risque à relancer** : les paires déjà calculées avec succès ne
+  sont jamais recalculées (voir la section précédente), donc une
+  interruption (Ctrl+C, coupure réseau, quota épuisé) n'oblige pas à
+  repartir de zéro — relance simplement la commande.
+- **Durée** : avec une clé OpenRouteService, compter grossièrement 10-15
+  minutes pour ~1800 hôtels × ~90 points d'intérêt (repose sur le quota
+  gratuit du compte ORS — voir la section précédente). Sans clé (OSRM
+  public), nettement plus lent et moins fiable.
+- **Hôtels sans localisation valide, ou en doublon d'ID** : automatiquement
+  ignorés (voir `Géolocalisé` dans le format hôtels ci-dessus) ; en cas de
+  doublon d'ID, la ligne géolocalisée est conservée en priorité.
+- **Le fichier hôtels utilisé pour ce précalcul peut être minimal** (juste
+  `ID`, `Latitude`, `Longitude` — pratique pour ne pas exposer la fiche
+  complète d'un hôtel) : le cache résultant est indexé par `ID`, donc
+  réutilisable tel quel une fois le fichier hôtels complet chargé dans
+  l'app, du moment que les `ID` correspondent.
+
 ## Prochaines étapes possibles
 
 - Passage à 5000 hôtels : la carte utilise déjà le rendu canvas (Leaflet)
