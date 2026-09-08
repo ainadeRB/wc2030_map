@@ -43,20 +43,18 @@ COLOR_MODES = {
     "Visite": "Visite",
 }
 
+# Fonds de carte gratuits, sans clé API (CARTO exige désormais une clé,
+# on utilise donc Esri/OpenStreetMap/OpenTopoMap qui restent libres d'accès).
 BASEMAPS = {
     "Clair épuré (recommandé)": {
-        "tiles": "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        "attr": '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "attr": "Tiles &copy; Esri — Esri, DeLorme, NAVTEQ",
     },
-    "Très épuré (sans labels)": {
-        "tiles": "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-        "attr": '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    "Standard (rues, OpenStreetMap)": {"tiles": "OpenStreetMap", "attr": None},
+    "Satellite": {
+        "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "attr": "Tiles &copy; Esri — Esri, Maxar, Earthstar Geographics",
     },
-    "Sombre": {
-        "tiles": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        "attr": '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    },
-    "Standard (OpenStreetMap)": {"tiles": "OpenStreetMap", "attr": None},
     "Relief": {"tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "attr": "OpenTopoMap"},
 }
 
@@ -451,41 +449,26 @@ def main():
     kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
     kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
 
-    map_col, table_col = st.columns([2.6, 1])
+    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields)
+    map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
+                           returned_objects=["last_clicked"])
+    if map_state and map_state.get("last_clicked"):
+        clicked = map_state["last_clicked"]
+        new_point = (clicked["lat"], clicked["lng"])
+        if new_point != st.session_state.get("ref_point"):
+            st.session_state["ref_point"] = new_point
+            st.rerun()
 
-    with map_col:
-        fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields)
-        map_state = st_folium(fmap, use_container_width=True, height=640, key="main_map",
-                               returned_objects=["last_clicked"])
-        if map_state and map_state.get("last_clicked"):
-            clicked = map_state["last_clicked"]
-            new_point = (clicked["lat"], clicked["lng"])
-            if new_point != st.session_state.get("ref_point"):
-                st.session_state["ref_point"] = new_point
-                st.rerun()
-
-        st.markdown(f"**Légende couleur : {color_label}**")
-        legend_items = [
-            (f"{int(v)} ★" if color_mode == "stars" else str(v), c)
-            for v, c in sorted(color_map.items(), key=lambda kv: str(kv[0]))
-        ]
-        legend_html = " &nbsp; ".join(
-            f'<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:{c};margin-right:4px;"></span>{lbl}'
-            for lbl, c in legend_items
-        )
-        st.markdown(legend_html, unsafe_allow_html=True)
-
-    with table_col:
-        st.markdown("**📊 Répartition par ville hôte**")
-        if not filtered_df.empty:
-            by_city = filtered_df.groupby("Ville hôte", dropna=True).agg(
-                Hôtels=("ID", "count"),
-                Capacité=("Capacité act (cha.)", "sum"),
-            ).sort_values("Capacité", ascending=False)
-            st.bar_chart(by_city["Capacité"], height=180)
-            st.dataframe(by_city, width="stretch", height=160)
-        else:
-            st.info("Aucun hôtel ne correspond aux filtres actuels.")
+    st.markdown(f"**Légende couleur : {color_label}**")
+    legend_items = [
+        (f"{int(v)} ★" if color_mode == "stars" else str(v), c)
+        for v, c in sorted(color_map.items(), key=lambda kv: str(kv[0]))
+    ]
+    legend_html = " &nbsp; ".join(
+        f'<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:{c};margin-right:4px;"></span>{lbl}'
+        for lbl, c in legend_items
+    )
+    st.markdown(legend_html, unsafe_allow_html=True)
 
     st.subheader("📋 Liste des hôtels filtrés")
     display_cols = [c for c in [
@@ -514,7 +497,7 @@ def main():
     with st.expander("ℹ️ À propos de cet outil / prochaines étapes"):
         st.markdown(
             """
-            - **Carte** : choisis le fond de carte (clair, très épuré, sombre, standard, relief) et active/désactive les hôtels et chaque type de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale.
+            - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque type de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale.
             - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
             - **Bulles** : taille = capacité (nb chambres) ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète).
