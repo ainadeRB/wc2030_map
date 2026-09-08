@@ -58,8 +58,13 @@ def main():
     if geolocated.empty or pois.empty:
         sys.exit("Rien à calculer (aucun hôtel géolocalisé ou aucun point d'intérêt).")
 
+    QUOTA_STOP_THRESHOLD = 2  # arrête le script après N échecs consécutifs de type quota/débit
+    consecutive_quota_errors = 0
+    stopped_early = False
+
     t0 = time.time()
     errors = []
+    i = 0
     for i, (_, poi) in enumerate(pois.iterrows(), start=1):
         label = f"{poi['Nom']} ({poi['Type']})"
         try:
@@ -75,10 +80,28 @@ def main():
         print(f"[{i}/{len(pois)}] {label} -> {n_ok}/{len(geolocated)} hôtels en {time.time() - t_poi:.1f}s — {status}")
         if error:
             errors.append((label, error))
+            consecutive_quota_errors = consecutive_quota_errors + 1 if "quota" in error.lower() else 0
+        else:
+            consecutive_quota_errors = 0
+
+        if consecutive_quota_errors >= QUOTA_STOP_THRESHOLD:
+            stopped_early = True
+            print(
+                f"\n⏸️  Quota du service de routage atteint (confirmé sur {consecutive_quota_errors} "
+                f"points d'intérêt consécutifs) — arrêt du script à {i}/{len(pois)} pour ne pas gaspiller "
+                "de temps sur des appels voués à échouer."
+            )
+            break
 
     elapsed = time.time() - t0
-    print(f"\nTerminé en {elapsed / 60:.1f} min.")
-    if errors:
+    print(f"\nArrêté en {elapsed / 60:.1f} min." if stopped_early else f"\nTerminé en {elapsed / 60:.1f} min.")
+    if stopped_early:
+        print(
+            "👉 Rien n'est perdu : relance exactement la même commande plus tard (le quota se renouvelle "
+            "généralement chaque jour) — les points d'intérêt déjà réussis ne seront pas recalculés, le "
+            "script reprendra automatiquement là où il s'est arrêté."
+        )
+    elif errors:
         print(f"\n⚠️ {len(errors)} point(s) d'intérêt ont rencontré une erreur au moins une fois")
         print("   (relance le script : le cache garde ce qui a déjà réussi, seul le manquant est retenté) :")
         for label, error in errors:

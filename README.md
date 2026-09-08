@@ -169,9 +169,15 @@ appel réseau au moment du filtrage.
   sont jamais recalculées (voir la section précédente), donc une
   interruption (Ctrl+C, coupure réseau, quota épuisé) n'oblige pas à
   repartir de zéro — relance simplement la commande.
-- **Durée** : avec une clé OpenRouteService, compter grossièrement 10-15
-  minutes pour ~1800 hôtels × ~90 points d'intérêt (repose sur le quota
-  gratuit du compte ORS — voir la section précédente). Sans clé (OSRM
+- **Quota quotidien limité** : les clés OpenRouteService gratuites
+  ("Basic") ont un quota journalier qui peut être largement inférieur au
+  volume total à calculer (ex. 1800 hôtels × 90 POI). Le script détecte
+  l'épuisement du quota (2 échecs consécutifs de ce type) et **s'arrête
+  proprement** plutôt que de continuer à échouer sur tous les points
+  d'intérêt restants — il indique combien ont été traités et où reprendre.
+  **Il suffit de relancer la même commande le lendemain** (le quota se
+  renouvelle généralement chaque jour) : le calcul reprend automatiquement
+  là où il s'était arrêté, sur plusieurs jours si besoin. Sans clé (OSRM
   public), nettement plus lent et moins fiable.
 - **Hôtels sans localisation valide, ou en doublon d'ID** : automatiquement
   ignorés (voir `Géolocalisé` dans le format hôtels ci-dessus) ; en cas de
