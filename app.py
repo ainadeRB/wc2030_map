@@ -177,15 +177,6 @@ def format_field_value(field, val):
     return html_lib.escape(str(val))
 
 
-# Style commun forçant le retour à la ligne : Leaflet met par défaut les
-# tooltips en `white-space: nowrap` (une valeur très longue s'étire alors
-# hors de la carte au lieu de s'arrêter au bord de l'infobulle) et les popups
-# n'ont pas toujours de largeur garantie selon le navigateur. On enveloppe
-# tout le contenu dans un conteneur qui force la largeur max et la coupure
-# des mots trop longs, indépendamment du champ concerné.
-WRAP_STYLE = "max-width:230px;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;"
-
-
 def _main_photo_html(hotel_id, width, style):
     """Vignette de la première photo de l'hôtel, ou None si aucune photo
     n'existe ou n'a pas pu être chargée (fichier corrompu, format non
@@ -206,7 +197,7 @@ def _main_photo_html(hotel_id, width, style):
 
 def build_tooltip_html(row, fields):
     parts = []
-    photo_html, _ = _main_photo_html(row.get("ID"), 160, "display:block;border-radius:4px;margin-bottom:4px;max-width:100%;")
+    photo_html, _ = _main_photo_html(row.get("ID"), 160, "display:block;border-radius:4px;margin-bottom:4px;")
     if photo_html:
         parts.append(photo_html)
 
@@ -219,7 +210,7 @@ def build_tooltip_html(row, fields):
         else:
             text_parts.append(f"{field} : {value_html}")
     parts.extend(text_parts or [f"<i>{MISSING_LABEL}</i>"])
-    return f'<div style="{WRAP_STYLE}">' + "<br>".join(parts) + "</div>"
+    return "<br>".join(parts)
 
 
 def build_popup_html(row):
@@ -228,7 +219,7 @@ def build_popup_html(row):
         return f"{val}{suffix}" if val is not None else f"<i>{MISSING_LABEL}</i>"
 
     lines = []
-    photo_html, n_photos = _main_photo_html(row.get("ID"), 300, "display:block;border-radius:4px;margin-bottom:4px;max-width:100%;")
+    photo_html, n_photos = _main_photo_html(row.get("ID"), 320, "display:block;border-radius:4px;margin-bottom:6px;max-width:100%;")
     if photo_html:
         lines.append(photo_html)
         if n_photos > 1:
@@ -247,7 +238,7 @@ def build_popup_html(row):
         f"Risque : {fmt('Risque')}",
         f"Note Booking : {fmt('Note Booking')}",
     ]
-    return f'<div style="{WRAP_STYLE}">' + "<br>".join(lines) + "</div>"
+    return "<br>".join(lines)
 
 
 @st.cache_data(show_spinner=False)
