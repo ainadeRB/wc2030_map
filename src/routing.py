@@ -89,6 +89,22 @@ def _fetch_durations_minutes_osrm(origin, destinations, profile="driving"):
     return [round(d / 60, 1) if d is not None else None for d in durations_s], None
 
 
+def _extract_ors_error_detail(resp) -> str:
+    """Extrait le message d'erreur réel renvoyé par OpenRouteService (au lieu
+    de se contenter du code HTTP), pour un diagnostic précis."""
+    try:
+        payload = resp.json()
+        err = payload.get("error")
+        if isinstance(err, dict):
+            return err.get("message") or str(err)
+        if err:
+            return str(err)
+    except ValueError:
+        pass
+    text = (resp.text or "").strip()
+    return text[:300] if text else "(pas de détail renvoyé par le serveur)"
+
+
 def _fetch_durations_minutes_ors(origin, destinations, api_key, profile="driving"):
     """Interroge OpenRouteService (Matrix API v2). Retourne (durées en
     minutes ou None par destination, message d'erreur ou None si succès)."""
@@ -105,11 +121,11 @@ def _fetch_durations_minutes_ors(origin, destinations, api_key, profile="driving
     try:
         resp = requests.post(url, json=body, headers=headers, timeout=REQUEST_TIMEOUT)
         if resp.status_code == 401:
-            return [None] * len(destinations), "Clé OpenRouteService invalide ou manquante (401)."
+            return [None] * len(destinations), f"Clé OpenRouteService invalide (401) : {_extract_ors_error_detail(resp)}"
         if resp.status_code == 403:
-            return [None] * len(destinations), "Accès refusé par OpenRouteService (403) — vérifie ta clé et ton quota."
+            return [None] * len(destinations), f"Accès refusé par OpenRouteService (403) : {_extract_ors_error_detail(resp)}"
         if resp.status_code == 429:
-            return [None] * len(destinations), "Quota OpenRouteService dépassé pour le moment (429)."
+            return [None] * len(destinations), f"Débit/quota OpenRouteService dépassé (429) : {_extract_ors_error_detail(resp)}"
         resp.raise_for_status()
         durations_s = resp.json()["durations"][0]
     except requests.Timeout:
