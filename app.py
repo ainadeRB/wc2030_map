@@ -73,6 +73,10 @@ DEFAULT_TOOLTIP_FIELDS = [
     "Nom", "Ville hôte", "Nouveau classement assimilé", "Capacité act (cha.)", "Nouveau Statut vérifié",
 ]
 
+# Rayon (px) des hôtels sans valeur pour le champ de taille choisi : fixe,
+# non affecté par le curseur d'échelle des bulles.
+BASE_DOT_RADIUS = 3
+
 CATEGORICAL_FILTERS = [
     ("Ville hôte", "Ville hôte"),
     ("Ville", "Ville"),
@@ -286,10 +290,16 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
                 if st.checkbox(f"　{t}", value=True, key=f"poi_{t}"):
                     active_poi_types.append(t)
 
+        st.markdown("**Taille des bulles**")
+        size_options = dict(NUMERIC_FILTERS)
+        size_label = st.selectbox("Taille selon", list(size_options.keys()), index=0, key="size_mode")
+        size_col = size_options[size_label]
+        size_scale = st.slider("Échelle des bulles", min_value=0.4, max_value=3.0, value=1.0, step=0.1, key="size_scale")
+        st.caption("Un hôtel sans valeur pour ce champ garde un petit point de taille fixe, quelle que soit l'échelle.")
+
         st.markdown("**Style des bulles**")
         color_label = st.selectbox("Couleur selon", list(COLOR_MODES.keys()), index=0)
         color_mode = COLOR_MODES[color_label]
-        st.caption("Taille des bulles = capacité (nombre de chambres)")
 
         if color_mode == "stars":
             values = sorted(v for v in hotels_df["Étoiles (estimées)"].dropna().unique().tolist())
@@ -313,7 +323,7 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
             default=DEFAULT_TOOLTIP_FIELDS, key="tooltip_fields",
         )
 
-    return show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields
+    return show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
 
 
 def sidebar_distance_filter():
@@ -339,7 +349,7 @@ def sidebar_distance_filter():
             st.session_state["distance_filter_on"] = False
 
 
-def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields):
+def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale):
     center = [31.7917, -7.0926]
     zoom = 5.4
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
@@ -356,13 +366,15 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
     folium.TileLayer(**tile_kwargs).add_to(m)
 
     if show_hotels and not hotels_df.empty:
-        cap_series = hotels_df["Capacité act (cha.)"].dropna()
-        cap_min, cap_max = (cap_series.min(), cap_series.max()) if not cap_series.empty else (0, 1)
+        size_series = hotels_df[size_col].dropna() if size_col in hotels_df.columns else pd.Series(dtype=float)
+        size_min, size_max = (size_series.min(), size_series.max()) if not size_series.empty else (0, 1)
         hotel_layer = folium.FeatureGroup(name="Hôtels", show=True)
         for _, row in hotels_df.iterrows():
             if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
                 continue
-            radius = scale_radius(row["Capacité act (cha.)"], cap_min, cap_max)
+            size_value = row.get(size_col)
+            has_size = size_value is not None and not (isinstance(size_value, float) and pd.isna(size_value))
+            radius = scale_radius(size_value, size_min, size_max) * size_scale if has_size else BASE_DOT_RADIUS
             cat_value = row["Étoiles (estimées)"] if color_mode == "stars" else row.get(color_mode)
             has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
             color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
@@ -434,7 +446,7 @@ def main():
     )
 
     hotels_df, pois_df = sidebar_data_sources()
-    show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields = sidebar_map_settings(hotels_df, pois_df)
+    show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
     filtered_df = sidebar_filters(hotels_df)
     sidebar_distance_filter()
 
@@ -455,7 +467,7 @@ def main():
     kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
     kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
 
-    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields)
+    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_types, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale)
     map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
                            returned_objects=["last_clicked"])
     if map_state and map_state.get("last_clicked"):
@@ -505,7 +517,7 @@ def main():
             """
             - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque type de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale.
             - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
-            - **Bulles** : taille = capacité (nb chambres) ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
+            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète).
             - **Filtre par distance** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre et ajuste le rayon en km. Le calcul actuel est à vol d'oiseau ; un calcul en **temps de trajet réel** (via un moteur de routage type OSRM) pourra être ajouté en connectant une API de routage.
             - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
