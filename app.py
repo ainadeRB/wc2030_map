@@ -14,6 +14,8 @@ from streamlit_folium import st_folium
 
 from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
 from src.geo import bounds_for, haversine_km
+from src.photos import get_hotel_photos, get_thumbnail_data_uri
+from src.routing import get_travel_times_minutes
 from src.styling import (
     build_palette_map,
     scale_radius,
@@ -110,6 +112,10 @@ def init_state():
     st.session_state.setdefault("ref_point", None)
     st.session_state.setdefault("radius_km", 15)
     st.session_state.setdefault("distance_filter_on", False)
+    st.session_state.setdefault("distance_mode", "Distance (vol d'oiseau)")
+    st.session_state.setdefault("escort_mode", False)
+    st.session_state.setdefault("escort_reduction_pct", 20)
+    st.session_state.setdefault("max_travel_minutes", 30)
 
 
 def to_excel_bytes(df: pd.DataFrame) -> bytes:
@@ -136,21 +142,78 @@ def get_color_map(color_mode, values):
     return st.session_state[state_key]
 
 
+MISSING_LABEL = "Non renseigné"
+# Champs numériques affichés avec une décimale plutôt qu'arrondis à l'entier.
+ONE_DECIMAL_FIELDS = {"Note Booking"}
+
+
+def format_field_value(field, val):
+    """Formate une valeur pour l'affichage, ou renvoie None si elle est
+    manquante (à charge de l'appelant d'afficher un texte comme
+    "Non renseigné" en italique dans ce cas)."""
+    if val is None:
+        return None
+    if isinstance(val, float) and pd.isna(val):
+        return None
+    if isinstance(val, str) and val.strip() == "":
+        return None
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        if field in ONE_DECIMAL_FIELDS:
+            return f"{val:.1f}"
+        return f"{val:,.0f}".replace(",", " ")
+    return str(val)
+
+
 def build_tooltip_html(row, fields):
     parts = []
+    photos = get_hotel_photos(row.get("ID"))
+    if photos:
+        try:
+            parts.append(f'<img src="{get_thumbnail_data_uri(photos[0], 160)}" style="display:block;border-radius:4px;margin-bottom:4px;">')
+        except Exception:
+            pass
+
+    text_parts = []
     for field in fields:
-        val = row.get(field)
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            continue
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            val = f"{val:,.0f}".replace(",", " ")
+        formatted = format_field_value(field, row.get(field))
+        value_html = formatted if formatted is not None else f"<i>{MISSING_LABEL}</i>"
         if field == "Nom":
-            parts.insert(0, f"<b>{val}</b>")
+            text_parts.insert(0, f"<b>{formatted or MISSING_LABEL}</b>")
         else:
-            parts.append(f"{field} : {val}")
-    if not parts:
-        parts = [str(row.get("Nom", ""))]
+            text_parts.append(f"{field} : {value_html}")
+    parts.extend(text_parts or [f"<i>{MISSING_LABEL}</i>"])
     return "<br>".join(parts)
+
+
+def build_popup_html(row):
+    def fmt(field, suffix=""):
+        val = format_field_value(field, row.get(field))
+        return f"{val}{suffix}" if val is not None else f"<i>{MISSING_LABEL}</i>"
+
+    lines = []
+    photos = get_hotel_photos(row.get("ID"))
+    if photos:
+        try:
+            lines.append(f'<img src="{get_thumbnail_data_uri(photos[0], 320)}" style="display:block;border-radius:4px;margin-bottom:6px;max-width:100%;">')
+            if len(photos) > 1:
+                lines.append(f'<span style="color:#666;font-size:0.85em;">+{len(photos) - 1} autre(s) photo(s) dans data/photos/{row.get("ID")}/</span>')
+        except Exception:
+            pass
+
+    lines += [
+        f"<b>{format_field_value('Nom', row.get('Nom')) or MISSING_LABEL}</b>",
+        f"Ville hôte : {fmt('Ville hôte')}",
+        f"Catégorie : {fmt('Catégorie')}",
+        f"Classement : {fmt('Nouveau classement assimilé')}",
+        f"Statut : {fmt('Nouveau Statut vérifié')}",
+        f"Capacité : {fmt('Capacité act (cha.)', ' ch.')}",
+        f"Chambres allouées : {fmt('#Chambres alloues total')}",
+        f"PMC : {fmt('PMC vérif', ' MAD')}",
+        f"Signature : {fmt('Signature')}",
+        f"Risque : {fmt('Risque')}",
+        f"Note Booking : {fmt('Note Booking')}",
+    ]
+    return "<br>".join(lines)
 
 
 @st.cache_data(show_spinner=False)
@@ -334,8 +397,31 @@ def sidebar_distance_filter():
             "Activer le filtre par distance", value=st.session_state["distance_filter_on"]
         )
         st.session_state["radius_km"] = st.slider(
-            "Rayon (km)", min_value=1, max_value=150, value=st.session_state["radius_km"]
+            "Rayon de recherche (km, vol d'oiseau)", min_value=1, max_value=150, value=st.session_state["radius_km"]
         )
+        st.caption("Pré-filtre toujours appliqué en premier (borne aussi la zone considérée en mode temps de trajet).")
+
+        st.session_state["distance_mode"] = st.radio(
+            "Filtrer selon", ["Distance (vol d'oiseau)", "Temps de trajet (voiture)"],
+            index=["Distance (vol d'oiseau)", "Temps de trajet (voiture)"].index(st.session_state["distance_mode"]),
+        )
+
+        if st.session_state["distance_mode"] == "Temps de trajet (voiture)":
+            st.session_state["max_travel_minutes"] = st.slider(
+                "Temps de trajet max (minutes)", min_value=5, max_value=180,
+                value=st.session_state["max_travel_minutes"], step=5,
+            )
+            st.session_state["escort_mode"] = st.checkbox(
+                "🚔 Mode Escorte (trajet accéléré)", value=st.session_state["escort_mode"],
+                help="Simule un trajet escorté : réduit le temps de trajet calculé d'un pourcentage donné.",
+            )
+            if st.session_state["escort_mode"]:
+                st.session_state["escort_reduction_pct"] = st.slider(
+                    "Réduction du temps de trajet (%)", min_value=0, max_value=60,
+                    value=st.session_state["escort_reduction_pct"],
+                )
+            st.caption("Les temps de trajet sont calculés via un service de routage en ligne, puis mis en cache sur disque : un trajet déjà calculé n'est jamais recalculé.")
+
         col1, col2 = st.columns(2)
         with col1:
             lat_in = st.number_input("Latitude", value=float(st.session_state["ref_point"][0]) if st.session_state["ref_point"] else 0.0, format="%.6f")
@@ -379,19 +465,7 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_types, color_mode, col
             has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
             color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
 
-            popup_html = f"""
-            <b>{row['Nom']}</b><br>
-            Ville hôte : {row['Ville hôte']}<br>
-            Catégorie : {row['Catégorie']}<br>
-            Classement : {row['Nouveau classement assimilé']}<br>
-            Statut : {row['Nouveau Statut vérifié']}<br>
-            Capacité : {row['Capacité act (cha.)']:.0f} ch.<br>
-            Chambres allouées : {row['#Chambres alloues total']:.0f}<br>
-            PMC : {row['PMC vérif']:.0f} MAD<br>
-            Signature : {row['Signature']}<br>
-            Risque : {row['Risque']}<br>
-            Note Booking : {row['Note Booking']}
-            """
+            popup_html = build_popup_html(row)
             folium.CircleMarker(
                 location=[row["Latitude"], row["Longitude"]],
                 radius=radius,
@@ -456,6 +530,23 @@ def main():
         filtered_df = filtered_df.assign(**{"Distance (km)": dist})
         filtered_df = filtered_df[filtered_df["Distance (km)"] <= st.session_state["radius_km"]]
 
+        if st.session_state["distance_mode"] == "Temps de trajet (voiture)" and not filtered_df.empty:
+            with st.spinner("Calcul des temps de trajet (mise en cache pour les prochaines fois)..."):
+                travel_times = get_travel_times_minutes((lat0, lon0), filtered_df)
+            raw_minutes = pd.to_numeric(
+                pd.Series([travel_times.get(str(hid)) for hid in filtered_df["ID"]], index=filtered_df.index),
+                errors="coerce",
+            )
+            if st.session_state["escort_mode"]:
+                effective_minutes = raw_minutes * (1 - st.session_state["escort_reduction_pct"] / 100)
+            else:
+                effective_minutes = raw_minutes
+            filtered_df = filtered_df.assign(**{"Temps de trajet (min)": effective_minutes.round(1)})
+            if raw_minutes.notna().sum() == 0:
+                st.warning("⚠️ Impossible de joindre le service de calcul de temps de trajet pour le moment — vérifie ta connexion internet. Le filtre par distance à vol d'oiseau reste actif.")
+            else:
+                filtered_df = filtered_df[filtered_df["Temps de trajet (min)"] <= st.session_state["max_travel_minutes"]]
+
     n_total = len(hotels_df)
     n_geo = int(hotels_df["Géolocalisé"].sum())
     n_shown = len(filtered_df)
@@ -493,6 +584,7 @@ def main():
         "ID", "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
         "Nouveau Statut vérifié", "Capacité act (cha.)", "#Chambres alloues total",
         "PMC vérif", "Signature", "Risque", "Visite", "Note Booking", "Distance (km)",
+        "Temps de trajet (min)",
     ] if c in filtered_df.columns]
     st.dataframe(filtered_df[display_cols].sort_values(display_cols[0]), width="stretch", height=350)
 
@@ -518,8 +610,9 @@ def main():
             - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque type de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale.
             - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
             - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
-            - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète).
-            - **Filtre par distance** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre et ajuste le rayon en km. Le calcul actuel est à vol d'oiseau ; un calcul en **temps de trajet réel** (via un moteur de routage type OSRM) pourra être ajouté en connectant une API de routage.
+            - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
+            - **Filtre par distance** : clique sur la carte (ou saisis des coordonnées) pour poser un point de référence, active le filtre et ajuste le rayon en km (vol d'oiseau, toujours appliqué en premier). Bascule sur "Temps de trajet (voiture)" pour filtrer sur un temps de trajet réel (calculé via un service de routage en ligne, mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable.
+            - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Aucune modification du fichier Excel n'est nécessaire.
             - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
             """
         )

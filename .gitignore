@@ -8,3 +8,5 @@ venv/
 # seules les données de démonstration (data/sample_*.xlsx) le sont.
 data/hotels.xlsx
 data/poi.xlsx
+data/travel_time_cache.json
+data/photos/
