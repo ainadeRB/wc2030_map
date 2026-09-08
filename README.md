@@ -188,6 +188,33 @@ appel réseau au moment du filtrage.
   réutilisable tel quel une fois le fichier hôtels complet chargé dans
   l'app, du moment que les `ID` correspondent.
 
+#### Regroupement par grille (`--grid-km`)
+
+Par défaut (`--grid-km 1`), les hôtels à moins d'1 km les uns des autres
+sont regroupés : un seul appel d'API est fait par groupe (au centroïde),
+au lieu d'un par hôtel — ex. sur le jeu de données réel du projet (1742
+hôtels, 86 POI), ça réduit le nombre de requêtes d'environ **60 %**. Sans
+ce regroupement, un quota quotidien serré peut ne jamais suffire à couvrir
+tous les hôtels.
+
+Chaque hôtel du groupe ne reçoit **pas** une valeur strictement identique :
+le script déduit la vitesse moyenne réellement observée sur le trajet
+calculé (distance à vol d'oiseau du centroïde ÷ temps obtenu), puis
+l'applique à l'écart de distance à vol d'oiseau entre l'hôtel et le
+centroïde. Concrètement, deux hôtels voisins mais pas au même endroit
+obtiennent des temps proches mais différents, ancrés sur un vrai calcul de
+trajet plutôt qu'une pure estimation à vol d'oiseau.
+
+```bash
+python scripts/precompute_travel_times.py --grid-km 2   # groupes plus larges, encore moins de requêtes
+python scripts/precompute_travel_times.py --grid-km 0   # désactive le regroupement, calcul exact par hôtel
+```
+
+Un run déjà effectué sans regroupement (ou avec une autre taille de
+grille) n'est pas perdu en changeant de taille : le script réutilise les
+temps déjà calculés par hôtel quand ils existent, avant de faire un
+nouvel appel.
+
 ## Prochaines étapes possibles
 
 - Passage à 5000 hôtels : la carte utilise déjà le rendu canvas (Leaflet)
