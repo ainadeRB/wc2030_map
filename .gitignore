@@ -9,6 +9,7 @@ venv/
 data/hotels.xlsx
 data/poi.xlsx
 data/travel_time_cache.json
+data/travel_time_estimates.json
 data/photos/
 
 # Clés API personnelles : jamais versionnées.

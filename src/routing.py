@@ -14,6 +14,13 @@ import requests
 import streamlit as st
 
 CACHE_PATH = Path("data") / "travel_time_cache.json"
+# Estimations calculées localement (voir scripts/estimate_travel_times.py) à
+# partir des trajets déjà réellement mesurés, pour combler les manques sans
+# appel réseau quand le quota est épuisé. Toujours un fichier séparé du
+# cache réel : precompute_travel_times.py l'ignore complètement, pour
+# continuer à chercher de vraies valeurs plus tard sans jamais les
+# confondre avec une approximation.
+ESTIMATES_PATH = Path("data") / "travel_time_estimates.json"
 REQUEST_TIMEOUT = 15
 # Certains services publics bloquent le User-Agent par défaut de `requests`
 # (identifié comme un bot) : on s'identifie donc comme un vrai navigateur.
@@ -62,6 +69,15 @@ def _save_cache(cache: dict) -> None:
         CACHE_PATH.write_text(json.dumps(cache))
     except OSError:
         pass
+
+
+def _load_estimates() -> dict:
+    if ESTIMATES_PATH.exists():
+        try:
+            return json.loads(ESTIMATES_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
 
 
 def _fetch_durations_minutes_osrm(origin, destinations, profile="driving"):
@@ -202,3 +218,48 @@ def get_travel_times_minutes(origin, hotels_df: pd.DataFrame, id_col="ID",
 
     result = {str(hid): bucket.get(str(hid), results.get(str(hid))) for hid in hotels_df[id_col]}
     return result, last_error
+
+
+def get_travel_times_with_fallback(origin, hotels_df: pd.DataFrame, id_col="ID",
+                                    lat_col="Latitude", lon_col="Longitude", profile="driving"):
+    """Comme get_travel_times_minutes, mais comble d'abord les manques avec
+    les estimations locales (data/travel_time_estimates.json, voir
+    scripts/estimate_travel_times.py) avant de tenter un appel réseau —
+    pour ne pas gaspiller de quota sur des paires déjà couvertes par une
+    approximation raisonnable, tout en gardant la possibilité d'obtenir une
+    vraie valeur en direct pour ce qui n'est ni en cache ni estimé.
+
+    Retourne (dict {ID hôtel: minutes ou None}, dernier message d'erreur ou
+    None, nombre d'hôtels dont la valeur vient d'une estimation)."""
+    cache = _load_cache()
+    okey = _origin_key(*origin)
+    bucket = cache.get(okey, {})
+
+    rows = hotels_df[[id_col, lat_col, lon_col]].dropna(subset=[lat_col, lon_col])
+    result = {}
+    still_missing_ids = set()
+    for _, r in rows.iterrows():
+        hid = str(r[id_col])
+        if hid in bucket:
+            result[hid] = bucket[hid]
+        else:
+            still_missing_ids.add(hid)
+
+    n_estimated = 0
+    if still_missing_ids:
+        estimates = _load_estimates().get(okey, {})
+        for hid in list(still_missing_ids):
+            est = estimates.get(hid)
+            if est is not None:
+                result[hid] = est
+                n_estimated += 1
+                still_missing_ids.discard(hid)
+
+    error = None
+    if still_missing_ids:
+        remaining_df = rows[rows[id_col].astype(str).isin(still_missing_ids)]
+        live_result, error = get_travel_times_minutes(origin, remaining_df, id_col, lat_col, lon_col, profile)
+        result.update(live_result)
+
+    result = {str(hid): result.get(str(hid)) for hid in hotels_df[id_col]}
+    return result, error, n_estimated

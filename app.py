@@ -17,7 +17,7 @@ from streamlit_folium import st_folium
 from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
 from src.geo import bounds_for, haversine_km
 from src.photos import get_hotel_photos, get_thumbnail_data_uri
-from src.routing import get_travel_times_minutes, using_ors
+from src.routing import get_travel_times_with_fallback, using_ors
 from src.styling import (
     build_palette_map,
     scale_radius,
@@ -551,7 +551,7 @@ def main():
 
         if st.session_state["distance_mode"] == "Temps de trajet (voiture)" and not filtered_df.empty:
             with st.spinner(f"Calcul du temps de trajet pour {len(filtered_df)} hôtel(s) (mise en cache pour les prochaines fois)..."):
-                travel_times, travel_error = get_travel_times_minutes((lat0, lon0), filtered_df)
+                travel_times, travel_error, n_estimated = get_travel_times_with_fallback((lat0, lon0), filtered_df)
             raw_minutes = pd.to_numeric(
                 pd.Series([travel_times.get(str(hid)) for hid in filtered_df["ID"]], index=filtered_df.index),
                 errors="coerce",
@@ -567,8 +567,13 @@ def main():
                     f"({travel_error or 'raison inconnue'}). Le filtre par distance à vol d'oiseau reste actif."
                 )
             else:
+                info_bits = []
+                if n_estimated:
+                    info_bits.append(f"{n_estimated} valeur(s) estimée(s) (pas encore de calcul réel, voir scripts/estimate_travel_times.py)")
                 if raw_minutes.isna().any():
-                    st.caption(f"ℹ️ Temps de trajet indisponible pour {int(raw_minutes.isna().sum())} hôtel(s) (exclus du filtre) — {travel_error or ''}")
+                    info_bits.append(f"{int(raw_minutes.isna().sum())} hôtel(s) sans aucune valeur, réelle ou estimée (exclus du filtre)")
+                if info_bits:
+                    st.caption("ℹ️ " + " · ".join(info_bits) + (f" — {travel_error}" if travel_error else ""))
                 filtered_df = filtered_df[filtered_df["Temps de trajet (min)"] <= st.session_state["max_travel_minutes"]]
 
     n_total = len(hotels_df)

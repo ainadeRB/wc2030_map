@@ -215,6 +215,33 @@ grille) n'est pas perdu en changeant de taille : le script réutilise les
 temps déjà calculés par hôtel quand ils existent, avant de faire un
 nouvel appel.
 
+#### Estimer les trajets manquants quand le quota est épuisé
+
+Si le quota du service de routage est épuisé avant d'avoir couvert tous les
+points d'intérêt, on peut estimer les trajets manquants à partir de ceux
+déjà réellement calculés, sans aucun appel réseau :
+
+```bash
+python scripts/estimate_travel_times.py
+```
+
+Le script calibre un modèle simple (temps ≈ ordonnée à l'origine + pente ×
+distance à vol d'oiseau) sur toutes les paires hôtel/POI déjà réellement
+mesurées dans `data/travel_time_cache.json`, puis l'applique pour estimer
+tout ce qui manque. Les estimations vont dans un fichier **séparé**,
+`data/travel_time_estimates.json` — jamais dans le cache réel :
+`precompute_travel_times.py` l'ignore complètement et continue de chercher
+de vraies valeurs pour tout ce qui manque quand le quota se renouvelle.
+
+Côté app, le filtre "Temps de trajet" utilise automatiquement une vraie
+valeur si elle existe, sinon l'estimation, sans appel réseau superflu ; un
+message indique combien de valeurs affichées sont des estimations. Le mode
+Escorte s'applique normalement dessus, comme sur une vraie valeur.
+
+Relance ce script après chaque nouveau lot de vraies données obtenu (via
+`precompute_travel_times.py`) pour affiner le modèle et réduire le nombre
+de trajets encore estimés.
+
 ## Prochaines étapes possibles
 
 - Passage à 5000 hôtels : la carte utilise déjà le rendu canvas (Leaflet)
