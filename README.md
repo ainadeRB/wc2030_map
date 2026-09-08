@@ -225,16 +225,26 @@ déjà réellement calculés, sans aucun appel réseau :
 python scripts/estimate_travel_times.py
 ```
 
-Le script calibre un modèle simple (temps ≈ ordonnée à l'origine + pente ×
-distance à vol d'oiseau) sur les paires hôtel/POI déjà réellement mesurées
-dans `data/travel_time_cache.json` (limité aux paires à ≤ 150 km, la plage
-réellement utilisée par le filtre de l'app — mélanger trajets courts en
-ville et longs trajets autoroutiers dans une même droite fausse surtout la
-prédiction sur les distances courtes, justement celles qui comptent le
-plus), puis l'applique pour estimer tout ce qui manque. Une ordonnée à
-l'origine qui resterait malgré tout irréaliste (> 10 min, soit le temps
-prédit pour une distance quasi nulle) est plafonnée automatiquement. Les
-estimations vont dans un fichier **séparé**,
+Le script calibre 7 modèles (temps ≈ ordonnée à l'origine + pente × distance
+à vol d'oiseau), un par tranche de distance, plutôt qu'une seule droite
+globale : la relation distance → temps n'est pas la même en ville qu'à
+l'approche de trajets d'autoroute. Tranches : 0-1, 1-3, 3-5, 5-10, 10-20,
+20-50, 50-150 km (au-delà de 150 km — hors de la plage réellement utilisée
+par le filtre de l'app — la dernière tranche est réutilisée par
+extrapolation). Chaque tranche est calibrée séparément sur les paires
+hôtel/POI déjà réellement mesurées dans `data/travel_time_cache.json` qui
+tombent dans cette tranche. La tranche 0-1 km est forcée de passer par
+l'origine (0 m = 0 min pile, une centaine de mètres ne fait que quelques
+secondes) : en dessous d'1 km il n'y a pas de raison d'avoir un temps
+incompressible. Les tranches suivantes sont raccordées entre elles (le
+temps prédit à la borne basse d'une tranche est toujours égal à celui
+prédit à la borne haute de la précédente), pour obtenir une courbe globale
+continue et strictement croissante plutôt que 7 morceaux qui pourraient se
+contredire. Une tranche sans assez de données réelles (< 5 paires pour la
+première, < 8 pour les autres) retombe sur une vitesse générique par
+défaut, croissante avec la distance (18 à 100 km/h selon la tranche, pour
+refléter route en ville vs autoroute), toujours raccordée à la tranche
+précédente. Les estimations vont dans un fichier **séparé**,
 `data/travel_time_estimates.json` — jamais dans le cache réel :
 `precompute_travel_times.py` l'ignore complètement et continue de chercher
 de vraies valeurs pour tout ce qui manque quand le quota se renouvelle.

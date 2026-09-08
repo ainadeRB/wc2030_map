@@ -1,7 +1,23 @@
-"""Calibre un modèle simple temps de trajet ≈ f(distance à vol d'oiseau) à
-partir des trajets déjà RÉELLEMENT calculés (dans data/travel_time_cache.json,
-rempli par precompute_travel_times.py), puis l'applique pour estimer tous les
-autres trajets hôtel × point d'intérêt qui n'ont pas encore de valeur réelle.
+"""Calibre un modèle temps de trajet ≈ f(distance à vol d'oiseau) à partir des
+trajets déjà RÉELLEMENT calculés (dans data/travel_time_cache.json, rempli
+par precompute_travel_times.py), puis l'applique pour estimer tous les autres
+trajets hôtel × point d'intérêt qui n'ont pas encore de valeur réelle.
+
+Le modèle est découpé en 7 TRANCHES de distance, chacune avec sa propre
+droite (temps ≈ a + b × distance), plutôt qu'une seule droite globale : la
+relation distance → temps n'est pas linéaire sur toute la plage (ville,
+route, autoroute n'ont pas la même vitesse effective). Les tranches :
+0-1 km, 1-3 km, 3-5 km, 5-10 km, 10-20 km, 20-50 km, 50-150 km.
+
+La tranche 0-1 km passe obligatoirement par l'origine (0 m = 0 min pile) :
+en dessous d'1 km on est forcément en trajet local, donc pas de temps
+incompressible à ajouter (pas de "min garanti" comme sur les tranches plus
+longues où stationnement, feux, sortie de ville, etc. pèsent davantage).
+Les tranches suivantes sont raccordées entre elles (le temps prédit à la
+borne basse d'une tranche est toujours égal au temps prédit à la borne
+haute de la tranche précédente), pour que l'ensemble reste une courbe
+continue et croissante plutôt que 7 morceaux disjoints qui pourraient se
+contredire (ex. un trajet de 10,1 km plus rapide qu'un trajet de 9,9 km).
 
 Les estimations vont dans un fichier SÉPARÉ, data/travel_time_estimates.json
 — jamais dans le cache réel. Ce fichier sert uniquement de repli côté
@@ -44,29 +60,46 @@ from src.routing import CACHE_PATH, ESTIMATES_PATH, _load_cache, _origin_key  # 
 MIN_PLAUSIBLE_SPEED_KMH = 2.0
 MAX_PLAUSIBLE_SPEED_KMH = 130.0
 
-# On ne calibre que sur des trajets à distance "raisonnable" (proche de ce
-# que le filtre de l'app utilise réellement, rayon max 150 km) : mélanger
-# des trajets courts (ville) et très longs (autoroute, des centaines de km)
-# dans une même droite tire l'ordonnée à l'origine vers le haut de façon
-# irréaliste, précisément dans la plage de distance qui compte le plus.
-MAX_TRAINING_DISTANCE_KM = 150.0
+# 7 tranches de distance (km), chacune calibrée séparément — la relation
+# distance → temps n'est pas la même en ville (courte distance) qu'à
+# l'approche de trajets d'autoroute (longue distance). Bornes hautes
+# exclusives sauf la dernière. La borne haute de la dernière tranche est
+# aussi la distance max d'entraînement (au-delà, la tranche est réutilisée
+# telle quelle par extrapolation — au-delà de 150 km sort de toute façon du
+# rayon de recherche utilisable dans l'app).
+DISTANCE_BANDS = [
+    (0.0, 1.0),
+    (1.0, 3.0),
+    (3.0, 5.0),
+    (5.0, 10.0),
+    (10.0, 20.0),
+    (20.0, 50.0),
+    (50.0, 150.0),
+]
 
-# Filet de sécurité : une ordonnée à l'origine au-delà de ce seuil n'est pas
-# crédible (temps pour une distance ~0), on la plafonne et on ne réajuste
-# que la pente sur cette base plutôt que de garder un modèle absurde.
-MAX_PLAUSIBLE_INTERCEPT_MIN = 10.0
+# Nombre minimum de paires réelles requis pour calibrer une tranche donnée ;
+# la première tranche (un seul paramètre, droite forcée par l'origine) peut
+# se contenter de moins de points que les autres (deux paramètres).
+MIN_PAIRS_BAND0 = 5
+MIN_PAIRS_OTHER = 8
 
-# Utilisé uniquement si aucune vraie donnée n'est disponible pour calibrer
-# (repli générique, à affiner dès que le premier vrai calcul est disponible).
-FALLBACK_INTERCEPT_MIN = 5.0
-FALLBACK_SPEED_KMH = 35.0
+# Pente minimale acceptée (= vitesse max plausible), pour ne jamais prédire
+# une vitesse irréaliste même avec peu de données bruitées dans une tranche.
+MIN_SLOPE_MIN_PER_KM = 60.0 / MAX_PLAUSIBLE_SPEED_KMH
+
+# Repli utilisé tranche par tranche quand aucune vraie donnée ne permet de
+# calibrer localement : vitesse effective croissante avec la distance
+# (ville → route → autoroute), pour un comportement réaliste par défaut en
+# attendant que precompute_travel_times.py ait couvert davantage de trajets.
+FALLBACK_SPEEDS_KMH = [18.0, 25.0, 30.0, 40.0, 55.0, 80.0, 100.0]
 
 
-def build_training_set(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
-    """Construit les paires (distance_km, minutes) à partir de tout ce qui
-    est déjà réellement calculé dans le cache, tous points d'intérêt
+def build_training_pairs(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
+    """Construit toutes les paires (distance_km, minutes) à partir de tout ce
+    qui est déjà réellement calculé dans le cache, tous points d'intérêt
     confondus, et retourne aussi le détail par point d'intérêt (pour le
-    rapport affiché à l'utilisateur)."""
+    rapport affiché à l'utilisateur). Ne filtre pas encore par tranche."""
+    max_dist = DISTANCE_BANDS[-1][1]
     distances, minutes_list = [], []
     known_pois = []
     for _, poi in pois.iterrows():
@@ -85,7 +118,7 @@ def build_training_set(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
             if minutes is None:
                 continue
             dist = haversine_km(lat, lon, hotel["Latitude"], hotel["Longitude"])
-            if dist <= 0 or dist > MAX_TRAINING_DISTANCE_KM:
+            if dist <= 0 or dist > max_dist:
                 continue
             speed = dist / (minutes / 60)
             if not (MIN_PLAUSIBLE_SPEED_KMH <= speed <= MAX_PLAUSIBLE_SPEED_KMH):
@@ -98,26 +131,100 @@ def build_training_set(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
     return np.array(distances), np.array(minutes_list), known_pois
 
 
-def fit_model(distances: np.ndarray, minutes: np.ndarray):
-    """Régression linéaire simple minutes ≈ a + b*distance_km. Retourne
-    (a, b, r2, capped). Bornes de sécurité : a >= 0, b > 0 (une vitesse
-    positive). Si l'ordonnée à l'origine dépasse
-    MAX_PLAUSIBLE_INTERCEPT_MIN (temps irréaliste pour une distance ~0),
-    elle est plafonnée et seule la pente est réajustée sur cette base
-    (droite forcée à passer par (0, a_plafonné)), plutôt que de garder un
-    modèle qui prédit un temps minimum absurde pour les trajets courts."""
-    b, a = np.polyfit(distances, minutes, 1)
-    a, b = max(0.0, a), max(0.3, b)
-    capped = False
-    if a > MAX_PLAUSIBLE_INTERCEPT_MIN:
-        a = MAX_PLAUSIBLE_INTERCEPT_MIN
-        b = max(0.3, float(np.sum(distances * (minutes - a)) / np.sum(distances ** 2)))
-        capped = True
+def assign_band(dist: float) -> int:
+    """Retourne l'indice de la tranche (dans DISTANCE_BANDS) à laquelle
+    appartient cette distance. Au-delà de la dernière borne, on reste sur la
+    dernière tranche (extrapolation plutôt que valeur manquante)."""
+    for i, (lo, hi) in enumerate(DISTANCE_BANDS):
+        if dist < hi or i == len(DISTANCE_BANDS) - 1:
+            return i
+    return len(DISTANCE_BANDS) - 1
+
+
+def _r2(distances, minutes, a, b):
     predicted = a + b * distances
     ss_res = float(np.sum((minutes - predicted) ** 2))
     ss_tot = float(np.sum((minutes - minutes.mean()) ** 2))
-    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    return a, b, r2, capped
+    return 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+
+
+def fit_bands(distances: np.ndarray, minutes: np.ndarray):
+    """Calibre les 7 modèles (un par tranche de DISTANCE_BANDS), raccordés
+    entre eux (le temps prédit à la borne basse d'une tranche == le temps
+    prédit à la borne haute de la précédente), pour rester une courbe
+    continue et croissante. Retourne une liste de dicts, un par tranche :
+    {a, b, n, r2, fallback}."""
+    models = []
+    prev_boundary_value = 0.0  # temps prédit à distance 0 (tranche 0 passe par l'origine)
+
+    for i, (lo, hi) in enumerate(DISTANCE_BANDS):
+        mask = (distances >= lo) & (distances < hi if i < len(DISTANCE_BANDS) - 1 else distances <= hi)
+        d_band, m_band = distances[mask], minutes[mask]
+        fallback_speed = FALLBACK_SPEEDS_KMH[i]
+
+        if i == 0:
+            # Tranche 0-1 km : droite forcée par l'origine (0 m = 0 min).
+            min_pairs = MIN_PAIRS_BAND0
+            if len(d_band) >= min_pairs:
+                b = float(np.sum(d_band * m_band) / np.sum(d_band ** 2))
+                b = max(MIN_SLOPE_MIN_PER_KM, b)
+                r2 = _r2(d_band, m_band, 0.0, b)
+                fallback = False
+            else:
+                b = 60.0 / fallback_speed
+                r2 = float("nan")
+                fallback = True
+            a = 0.0
+        else:
+            min_pairs = MIN_PAIRS_OTHER
+            if len(d_band) >= min_pairs:
+                b, a = np.polyfit(d_band, m_band, 1)
+                b = max(MIN_SLOPE_MIN_PER_KM, float(b))
+                a = max(0.0, float(a))
+                # R² du fit brut, avant raccord : reflète la qualité du fit
+                # local sur les données de cette tranche, indépendamment de
+                # l'ajustement d'ordonnée à l'origine fait juste après.
+                r2 = _r2(d_band, m_band, a, b)
+                # Raccord : le temps prédit à la borne basse de cette tranche
+                # doit correspondre à celui prédit par la tranche précédente
+                # à cette même borne, pour éviter toute cassure ou baisse de
+                # temps quand la distance augmente. Seule l'ordonnée à
+                # l'origine est corrigée (la pente, issue des données de la
+                # tranche, est conservée telle quelle).
+                a = prev_boundary_value - b * lo
+                fallback = False
+            else:
+                b = 60.0 / fallback_speed
+                a = prev_boundary_value - b * lo
+                r2 = float("nan")
+                fallback = True
+
+        models.append({"lo": lo, "hi": hi, "a": a, "b": b, "n": len(d_band), "r2": r2, "fallback": fallback})
+        prev_boundary_value = a + b * hi
+
+    return models
+
+
+def predict_minutes(models, dist: float) -> float:
+    band = assign_band(dist)
+    m = models[band]
+    return max(0.0, m["a"] + m["b"] * dist)
+
+
+def print_report(models, known_pois):
+    print(f"\nCalibration en {len(DISTANCE_BANDS)} tranches, à partir de {sum(m['n'] for m in models):,} paires réelles connues, "
+          f"sur {len(known_pois)} point(s) d'intérêt déjà calculé(s) :".replace(",", " "))
+    for nom, n in known_pois:
+        print(f"  - {nom} : {n} paire(s)")
+    print()
+    for m in models:
+        speed_kmh = 60.0 / m["b"]
+        label = f"{m['lo']:g}-{m['hi']:g} km"
+        eq = f"temps (min) ≈ {m['a']:.2f} + {m['b']:.2f} × distance (km)"
+        if m["fallback"]:
+            print(f"  [{label:>10}] {eq}  [repli, seulement {m['n']} paire(s) réelle(s), vitesse générique {speed_kmh:.0f} km/h]")
+        else:
+            print(f"  [{label:>10}] {eq}  [vitesse implicite ≈ {speed_kmh:.0f} km/h, R² = {m['r2']:.2f}, {m['n']} paire(s)]")
 
 
 def main():
@@ -142,34 +249,9 @@ def main():
     print(f"Hôtels géolocalisés et uniques : {len(geolocated)}")
     print(f"Points d'intérêt : {len(pois)}")
 
-    distances, minutes, known_pois = build_training_set(geolocated, pois, cache)
-
-    if len(distances) >= 20:
-        a, b, r2, capped = fit_model(distances, minutes)
-        speed_kmh = 60 / b
-        print(
-            f"\nCalibration à partir de {len(distances):,} paires réelles connues (≤ {MAX_TRAINING_DISTANCE_KM:.0f} km), "
-            f"sur {len(known_pois)} point(s) d'intérêt déjà calculé(s) :".replace(",", " ")
-        )
-        for nom, n in known_pois:
-            print(f"  - {nom} : {n} paire(s)")
-        print(f"\nModèle : temps (min) ≈ {a:.1f} + {b:.2f} × distance (km)  "
-              f"[vitesse implicite ≈ {speed_kmh:.0f} km/h, R² = {r2:.2f}]")
-        if capped:
-            print(
-                f"⚠️ L'ordonnée à l'origine calculée dépassait {MAX_PLAUSIBLE_INTERCEPT_MIN:.0f} min "
-                f"(irréaliste pour une distance ~0) — plafonnée à {a:.1f} min, pente réajustée en conséquence."
-            )
-    else:
-        a, b = FALLBACK_INTERCEPT_MIN, 60 / FALLBACK_SPEED_KMH
-        print(
-            f"\n⚠️ Pas assez de vraies données pour calibrer un modèle fiable "
-            f"({len(distances)} paire(s) trouvée(s), 20 minimum) — utilisation d'un "
-            f"repli générique : {FALLBACK_INTERCEPT_MIN:.0f} min + vitesse moyenne de "
-            f"{FALLBACK_SPEED_KMH:.0f} km/h. Relance ce script dès que "
-            "precompute_travel_times.py aura calculé au moins quelques points d'intérêt "
-            "pour affiner l'estimation."
-        )
+    distances, minutes, known_pois = build_training_pairs(geolocated, pois, cache)
+    models = fit_bands(distances, minutes)
+    print_report(models, known_pois)
 
     estimates = json.loads(ESTIMATES_PATH.read_text()) if ESTIMATES_PATH.exists() else {}
     n_total_estimated = 0
@@ -188,7 +270,7 @@ def main():
                 n_total_real += 1
                 continue
             dist = haversine_km(lat, lon, hotel["Latitude"], hotel["Longitude"])
-            est_bucket[hid] = round(max(0.5, a + b * dist), 1)
+            est_bucket[hid] = round(predict_minutes(models, dist), 1)
             n_total_estimated += 1
 
     ESTIMATES_PATH.parent.mkdir(parents=True, exist_ok=True)
