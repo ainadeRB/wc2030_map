@@ -116,14 +116,38 @@ photos supplémentaires. Ce dossier n'est **jamais versionné dans git**.
 
 ## Temps de trajet et cache
 
-Le mode "Temps de trajet (voiture)" appelle un service de routage public
-(OSRM) pour calculer le temps réel entre le point de référence et chaque
-hôtel pré-filtré par le rayon vol d'oiseau. Chaque résultat est enregistré
-dans `data/travel_time_cache.json` (non versionné) : un trajet déjà calculé
-pour un point donné n'est **jamais recalculé**, y compris après redémarrage
-de l'app. Si le service est injoignable (pas de connexion), un message
-d'avertissement s'affiche et l'app retombe sur le filtre vol d'oiseau, sans
-planter.
+Le mode "Temps de trajet (voiture)" calcule le temps réel entre le point de
+référence et chaque hôtel pré-filtré par le rayon vol d'oiseau. Le point de
+référence peut être posé en cliquant sur la carte, en choisissant
+directement un point d'intérêt dans la liste ("Point de référence = un
+point d'intérêt"), ou en saisissant des coordonnées.
+
+Chaque résultat est enregistré dans `data/travel_time_cache.json` (non
+versionné) : un trajet déjà calculé pour un point donné n'est **jamais
+recalculé**, y compris après redémarrage de l'app. Si le service est
+injoignable, un message d'avertissement affiche la raison précise (erreur
+réseau, délai dépassé, quota dépassé...) et l'app retombe sur le filtre vol
+d'oiseau, sans planter.
+
+### Service de routage : OSRM (par défaut) ou OpenRouteService (recommandé)
+
+Par défaut, l'app utilise le service public **OSRM** — gratuit, sans
+inscription, mais sans garantie de disponibilité (c'est une instance de
+démonstration, pas prévue pour un usage intensif).
+
+Pour plus de fiabilité, configure une clé **OpenRouteService** (gratuite,
+inscription par email sans carte bancaire, sur
+https://openrouteservice.org/dev/#/signup) :
+
+1. Copie `.streamlit/secrets.toml.example` en `.streamlit/secrets.toml`.
+2. Renseigne ta clé : `ORS_API_KEY = "ta-clé-ici"`.
+3. Relance l'app.
+
+`.streamlit/secrets.toml` n'est **jamais versionné dans git** (voir
+`.gitignore`) — seul le fichier `.example` (sans clé) l'est. Dès que la clé
+est détectée, l'app bascule automatiquement sur OpenRouteService (le bandeau
+"Service de routage actif" dans la barre latérale confirme lequel est
+utilisé) ; sans clé, elle continue de fonctionner avec OSRM.
 
 ## Prochaines étapes possibles
 

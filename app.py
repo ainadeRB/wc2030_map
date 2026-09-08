@@ -17,7 +17,7 @@ from streamlit_folium import st_folium
 from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
 from src.geo import bounds_for, haversine_km
 from src.photos import get_hotel_photos, get_thumbnail_data_uri
-from src.routing import get_travel_times_minutes
+from src.routing import get_travel_times_minutes, using_ors
 from src.styling import (
     build_palette_map,
     scale_radius,
@@ -394,10 +394,10 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
     return show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
 
 
-def sidebar_distance_filter():
+def sidebar_distance_filter(pois_df: pd.DataFrame):
     with st.sidebar.container(border=True):
         st.markdown("### 📍 Distance / Temps de trajet")
-        st.caption("Clique sur la carte pour poser un point de référence.")
+        st.caption("Clique sur la carte, choisis un point d'intérêt, ou saisis des coordonnées pour poser un point de référence.")
         st.session_state["distance_filter_on"] = st.checkbox(
             "Activer le filtre", value=st.session_state["distance_filter_on"]
         )
@@ -428,7 +428,17 @@ def sidebar_distance_filter():
                     "Réduction du temps de trajet (%)", min_value=0, max_value=60,
                     value=st.session_state["escort_reduction_pct"],
                 )
-            st.caption("Les temps de trajet sont calculés via un service de routage en ligne, puis mis en cache sur disque : un trajet déjà calculé n'est jamais recalculé.")
+            provider = "OpenRouteService (clé configurée)" if using_ors() else "OSRM public (aucune clé configurée)"
+            st.caption(f"Service de routage actif : **{provider}**. Chaque trajet calculé est mis en cache sur disque et n'est jamais recalculé.")
+
+        if not pois_df.empty:
+            pois_sorted = pois_df.sort_values(["Type", "Nom"]).reset_index(drop=True)
+            placeholder = "— Choisir un point d'intérêt —"
+            poi_options = [placeholder] + [f"{row['Nom']} ({row['Type']})" for _, row in pois_sorted.iterrows()]
+            poi_choice = st.selectbox("Point de référence = un point d'intérêt", poi_options, key="poi_ref_choice")
+            if poi_choice != placeholder:
+                selected = pois_sorted.iloc[poi_options.index(poi_choice) - 1]
+                st.session_state["ref_point"] = (float(selected["Latitude"]), float(selected["Longitude"]))
 
         col1, col2 = st.columns(2)
         with col1:
@@ -531,7 +541,7 @@ def main():
     hotels_df, pois_df = sidebar_data_sources()
     show_hotels, active_poi_types, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
     filtered_df = sidebar_filters(hotels_df)
-    sidebar_distance_filter()
+    sidebar_distance_filter(pois_df)
 
     if st.session_state["distance_filter_on"] and st.session_state["ref_point"]:
         lat0, lon0 = st.session_state["ref_point"]

@@ -10,3 +10,6 @@ data/hotels.xlsx
 data/poi.xlsx
 data/travel_time_cache.json
 data/photos/
+
+# Clés API personnelles : jamais versionnées.
+.streamlit/secrets.toml
