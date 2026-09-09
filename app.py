@@ -416,30 +416,42 @@ def booking_band_index(value, edges):
 def render_booking_band_editor(edges, colors, ids):
     """UI pour éditer les tranches de la coloration "Note Booking
     (tranches)" : bornes 0 et 10 fixes (imposées par le format de la note),
-    une borne interne modifiable par tranche au 0,1 près, une couleur par
-    tranche, et un bouton pour en ajouter une nouvelle (scinde en deux la
-    tranche la plus large actuellement). Les widgets sont callés par
-    `ids[i]` (identifiant stable de la tranche), jamais par `i` lui-même
-    (voir la docstring de get_booking_bands pour pourquoi)."""
+    une borne min et une borne max affichées pour chaque tranche (la min
+    n'est jamais éditable directement — elle recopie toujours la max de la
+    tranche précédente, pour garantir qu'elles restent identiques des deux
+    côtés), au 0,1 près (les flèches haut/bas de l'input numérique), une
+    couleur par tranche, et un bouton pour en ajouter une nouvelle (scinde
+    en deux la tranche la plus large actuellement). Les widgets éditables
+    sont callés par `ids[i]` (identifiant stable de la tranche), jamais
+    par `i` lui-même (voir la docstring de get_booking_bands pour
+    pourquoi).
+
+    La borne min et la max fixe (dernière tranche) sont affichées avec
+    st.metric plutôt qu'un number_input désactivé : un number_input garde
+    son état par sa clé même désactivé, donc un nouveau `value=` passé à
+    un rechargement ultérieur est silencieusement ignoré (Streamlit ne
+    l'utilise que pour le tout premier rendu de cette clé) — bug constaté
+    à l'usage, la min affichée restait bloquée sur l'ancienne valeur après
+    avoir changé la max de la tranche précédente. st.metric n'a pas cet
+    état : il affiche toujours la valeur qu'on lui passe, à chaque
+    rechargement."""
     n_bands = len(edges) - 1
     for i in range(n_bands):
-        lo, hi = edges[i], edges[i + 1]
         is_last = i == n_bands - 1
         band_id = ids[i]
-        cols = st.columns([3, 2, 2])
-        cols[0].caption(f"Tranche {i + 1} : [{lo:.1f} – {hi:.1f}{']' if is_last else '['}")
+        st.markdown(f"**Tranche {i + 1}**")
+        min_col, max_col, color_col = st.columns([1, 1, 1])
+        min_col.metric("Min", f"{edges[i]:.1f}".replace(".", ","))
         if is_last:
-            cols[1].caption("Max : 10,0 (fixe)")
+            max_col.metric("Max", "10,0 (fixe)")
         else:
             next_hi = edges[i + 2] if i + 2 < len(edges) else 10.0
-            new_hi = cols[1].number_input(
-                f"Max tranche {i + 1}", min_value=round(lo + 0.1, 1), max_value=round(next_hi - 0.1, 1),
-                value=hi, step=0.1, format="%.1f", key=f"booking_band_max_{band_id}", label_visibility="collapsed",
+            new_hi = max_col.number_input(
+                "Max", min_value=round(edges[i] + 0.1, 1), max_value=round(next_hi - 0.1, 1),
+                value=edges[i + 1], step=0.1, format="%.1f", key=f"booking_band_max_{band_id}",
             )
             edges[i + 1] = round(new_hi, 1)
-        colors[i] = cols[2].color_picker(
-            f"Couleur tranche {i + 1}", colors[i], key=f"booking_band_color_{band_id}", label_visibility="collapsed",
-        )
+        colors[i] = color_col.color_picker("Couleur", colors[i], key=f"booking_band_color_{band_id}")
 
     can_add = any(round(edges[i + 1] - edges[i], 1) >= 0.2 for i in range(n_bands))
     if st.button("➕ Ajouter une tranche", disabled=not can_add, key="add_booking_band"):
