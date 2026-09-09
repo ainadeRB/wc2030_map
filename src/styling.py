@@ -31,7 +31,7 @@ POI_TYPE_COLORS = {
 }
 POI_TYPE_ICON = {
     "Stades": "flag",
-    "Sites d'entraînement": "futbol-o",
+    "Sites d'entraînement": "futbol",
     "Aéroports": "plane",
     "Fan Festival": "users",
     "Autres": "map-marker",
@@ -81,3 +81,17 @@ def hex_to_rgba(hex_color, alpha=0.75):
     hex_color = hex_color.lstrip("#")
     r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
     return f"rgba({r},{g},{b},{alpha})"
+
+
+def contrasting_icon_color(hex_color, dark="#000000", light="#ffffff"):
+    """Noir ou blanc selon la luminosité perçue de `hex_color` (formule YIQ),
+    pour qu'une icône reste lisible quelle que soit la couleur de fond
+    choisie par l'utilisateur (icône sombre sur fond clair, claire sur fond
+    sombre)."""
+    hex_color = hex_color.lstrip("#")
+    try:
+        r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return dark
+    yiq = (r * 299 + g * 587 + b * 114) / 1000
+    return dark if yiq >= 150 else light

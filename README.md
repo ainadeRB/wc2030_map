@@ -18,7 +18,9 @@ Coupe du Monde 2030 au Maroc.
 - **Couches activables/désactivables** : hôtels, et une couche par type de
   point d'intérêt (un onglet du fichier POI) — quand un onglet distingue des
   sous-catégories (ex. les sites d'entraînement "VSTS" / "TBC" / "RBC"),
-  chacune devient sa propre couche, activable indépendamment.
+  chacune devient sa propre couche, activable indépendamment. Couleur de
+  chaque type de point d'intérêt personnalisable (icône automatiquement
+  noire ou blanche selon la couleur choisie, pour rester lisible).
 - **Filtres sur (quasiment) toutes les colonnes** du fichier hôtels : ville
   hôte, ville, catégorie, classement, statut, propriétaire, opérateur,
   signatures, risque, visite, capacité, prix moyen (PMC), chambres

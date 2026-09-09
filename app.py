@@ -21,6 +21,7 @@ from src.photos import get_hotel_photos, get_thumbnail_data_uri
 from src.routing import get_travel_times_with_fallback, using_ors
 from src.styling import (
     build_palette_map,
+    contrasting_icon_color,
     scale_radius,
     DEFAULT_COLOR,
     POI_TYPE_COLORS,
@@ -120,6 +121,12 @@ DEFAULT_TOOLTIP_FIELDS = [
 # non affecté par le curseur d'échelle des bulles.
 BASE_DOT_RADIUS = 3
 
+# Taille (px) du badge rond des points d'intérêt. Un DivIcon HTML plutôt que
+# folium.Icon (Leaflet.AwesomeMarkers) : ce dernier n'accepte qu'une palette
+# de couleurs de fond nommée fixe, pas une couleur arbitraire choisie par
+# l'utilisateur.
+POI_MARKER_SIZE_PX = 26
+
 CATEGORICAL_FILTERS = [
     ("Ville hôte", "Ville hôte"),
     ("Ville", "Ville"),
@@ -188,6 +195,19 @@ def get_color_map(color_mode, values):
         for v in values:
             if v not in st.session_state[state_key]:
                 st.session_state[state_key][v] = DEFAULT_COLOR
+    return st.session_state[state_key]
+
+
+def get_poi_color_map(poi_types):
+    """Palette éditable par l'utilisateur pour la couleur des points
+    d'intérêt (une couleur par type/onglet), conservée en session."""
+    state_key = "poi_colormap"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = {t: POI_TYPE_COLORS.get(t, DEFAULT_COLOR) for t in poi_types}
+    else:
+        for t in poi_types:
+            if t not in st.session_state[state_key]:
+                st.session_state[state_key][t] = POI_TYPE_COLORS.get(t, DEFAULT_COLOR)
     return st.session_state[state_key]
 
 
@@ -441,9 +461,10 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
         st.markdown("**Couches**")
         show_hotels = st.checkbox("Hôtels", value=True)
         active_poi_layers = []
-        if not pois_df.empty:
+        poi_types = sorted(pois_df["Type"].dropna().unique().tolist()) if not pois_df.empty else []
+        if poi_types:
             st.caption("Points d'intérêt")
-            for t in sorted(pois_df["Type"].dropna().unique().tolist()):
+            for t in poi_types:
                 layer_names = sorted(pois_df.loc[pois_df["Type"] == t, "Couche POI"].dropna().unique().tolist())
                 if len(layer_names) <= 1:
                     layer_name = layer_names[0] if layer_names else t
@@ -455,6 +476,13 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
                         sub_label = layer_name.split(" — ", 1)[-1]
                         if st.checkbox(f"　　{sub_label}", value=True, key=f"poi_{layer_name}"):
                             active_poi_layers.append(layer_name)
+
+        poi_color_map = get_poi_color_map(poi_types)
+        if poi_types:
+            with st.expander("🎨 Couleurs des points d'intérêt"):
+                st.caption("La couleur de l'icône à l'intérieur (noir/blanc) s'adapte automatiquement pour rester lisible.")
+                for t in poi_types:
+                    poi_color_map[t] = st.color_picker(t, poi_color_map.get(t, DEFAULT_COLOR), key=f"poi_cp_{t}")
 
         st.markdown("**Taille des bulles**")
         size_options = dict(NUMERIC_FILTERS)
@@ -489,7 +517,7 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
             default=DEFAULT_TOOLTIP_FIELDS, key="tooltip_fields",
         )
 
-    return show_hotels, active_poi_layers, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
+    return show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
 
 
 def sidebar_distance_filter(pois_df: pd.DataFrame):
@@ -582,7 +610,7 @@ def sidebar_distance_filter(pois_df: pd.DataFrame):
             st.session_state["distance_filter_on"] = False
 
 
-def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated=0):
+def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated=0):
     center = [31.7917, -7.0926]
     zoom = 5.4
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
@@ -632,14 +660,25 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
             continue
         layer = folium.FeatureGroup(name=layer_name, show=True)
         base_type = subset["Type"].iloc[0]
-        color = POI_TYPE_COLORS.get(base_type, "#333333")
+        bg_color = poi_color_map.get(base_type, POI_TYPE_COLORS.get(base_type, "#333333"))
         icon = POI_TYPE_ICON.get(base_type, "map-marker")
+        glyph_color = contrasting_icon_color(bg_color)
+        badge_html = (
+            f'<div style="background:{bg_color};width:{POI_MARKER_SIZE_PX}px;height:{POI_MARKER_SIZE_PX}px;'
+            f'border-radius:50%;border:2px solid rgba(0,0,0,0.35);box-shadow:0 1px 3px rgba(0,0,0,0.4);'
+            f'display:flex;align-items:center;justify-content:center;">'
+            f'<i class="fa fa-{icon}" style="color:{glyph_color};font-size:{POI_MARKER_SIZE_PX - 12}px;"></i></div>'
+        )
         for _, row in subset.iterrows():
             poi_tooltip = escape_backticks(html_lib.escape(f"{row['Nom']} ({layer_name})"))
             folium.Marker(
                 location=[row["Latitude"], row["Longitude"]],
                 tooltip=folium.Tooltip(poi_tooltip, sticky=True, direction="auto"),
-                icon=folium.Icon(color="lightgray", icon_color=color, icon=icon, prefix="fa"),
+                icon=folium.DivIcon(
+                    html=badge_html,
+                    icon_size=(POI_MARKER_SIZE_PX, POI_MARKER_SIZE_PX),
+                    icon_anchor=(POI_MARKER_SIZE_PX // 2, POI_MARKER_SIZE_PX // 2),
+                ),
             ).add_to(layer)
         layer.add_to(m)
 
@@ -673,7 +712,7 @@ def main():
     )
 
     hotels_df, pois_df = sidebar_data_sources()
-    show_hotels, active_poi_layers, color_mode, color_label, color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
+    show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
     filtered_df = sidebar_filters(hotels_df)
     sidebar_distance_filter(pois_df)
 
@@ -723,7 +762,7 @@ def main():
     kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
     kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
 
-    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated_for_banner)
+    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated_for_banner)
     map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
                            returned_objects=["last_clicked"])
     if map_state and map_state.get("last_clicked"):
