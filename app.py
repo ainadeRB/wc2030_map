@@ -8,7 +8,6 @@ import json
 from io import BytesIO
 from pathlib import Path
 
-import branca.element
 import folium
 import numpy as np
 import pandas as pd
@@ -157,94 +156,6 @@ class _BadgeZoomVisibility(folium.MacroElement):
         super().__init__()
         self._name = "BadgeZoomVisibility"
         self.min_zoom = min_zoom
-
-
-class _RawScript(branca.element.Element):
-    """Insère du JS déjà généré directement dans la section <script> d'une
-    figure, sans jamais le repasser par le lexer Jinja — voir la docstring
-    de _HotelMarkersLayer. `_template` est une constante de CLASSE (donc
-    compilée une seule fois, jamais par instance), et le texte passe en
-    simple variable (`this.raw`) : Jinja ne fait qu'une insertion de
-    chaîne, sans re-analyser son contenu comme s'il s'agissait d'une
-    nouvelle source de template."""
-
-    _template = Template(u"{{ this.raw|safe }}")
-
-    def __init__(self, raw):
-        super().__init__()
-        self._name = "RawScript"
-        self.raw = raw
-
-
-def _json_for_script(data) -> str:
-    """JSON de `data`, ré-encodé en littéral JS sûr à insérer tel quel dans
-    un `<script>` (ex. `JSON.parse(` + ce texte + `)`), guillemets/
-    antislashs échappés (double json.dumps) et "<"/">"/"&" remplacés par
-    leur échappement unicode pour empêcher toute évasion via une séquence
-    "</script>" cachée dans un champ hôtel (nom, etc.). str.replace (pas
-    translate : plus rapide ici, translate() dégrade avec des valeurs de
-    remplacement multi-caractères)."""
-    return json.dumps(json.dumps(data)).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-
-
-class _HotelMarkersLayer(folium.MacroElement):
-    """Un lot de bulles d'hôtel + leurs badges, créés par UN SEUL bloc JS
-    parcourant un tableau de données, au lieu d'un folium.CircleMarker et
-    d'un folium.Marker(DivIcon) par hôtel.
-
-    Pourquoi : chaque instance d'élément Folium/branca (CircleMarker,
-    Marker, Popup, Tooltip, DivIcon...) coûte son propre passage de rendu
-    Jinja au moment du rendu de la carte, quel que soit son contenu — voir
-    branca.element.MacroElement.render(), qui ré-enveloppe le résultat de
-    chaque macro (header/html/script) dans un nouvel Element(...), LEQUEL
-    RECOMPILE UN TEMPLATE JINJA À PARTIR DE CE TEXTE DÉJÀ RENDU, comme s'il
-    s'agissait d'une nouvelle source à analyser. Profilé sur ~1800 hôtels
-    sans photos : plus de 10 000 de ces compilations, ~90% du temps de
-    génération de la carte — un coût FIXE par instance, indépendant de la
-    taille du contenu. Mais avec des popups volumineux (photos en base64),
-    ce même mécanisme devient un coût PROPORTIONNEL À LA TAILLE DU TEXTE
-    (le lexer Jinja scanne caractère par caractère un texte qui ne contient
-    plus aucune syntaxe de template) : sur un lot avec ~25% de popups de
-    ~50 Ko, ce seul mécanisme a fait exploser le temps de rendu à plusieurs
-    secondes malgré le regroupement en lots. D'où `render()` ci-dessous,
-    qui court-circuite entièrement ce mécanisme par défaut en insérant le
-    script généré via `_RawScript` (jamais recompilé)."""
-
-    def __init__(self, layer_var, markers, popup_max_width):
-        super().__init__()
-        self._name = "HotelMarkersLayer"
-        self.layer_var = layer_var
-        self.markers_json = _json_for_script(markers)
-        self.popup_max_width = popup_max_width
-
-    def render(self, **kwargs):
-        script = f"""
-        (function() {{
-            var group = {self.layer_var};
-            var data = JSON.parse({self.markers_json});
-            data.forEach(function(h) {{
-                var cm = L.circleMarker([h.lat, h.lng], {{
-                    radius: h.radius, color: h.color, weight: 1.5,
-                    fill: true, fillColor: h.color, fillOpacity: 0.75
-                }});
-                cm.bindTooltip(h.tooltip, {{sticky: true, direction: "auto"}});
-                cm.bindPopup(h.popup, {{maxWidth: {self.popup_max_width}}});
-                cm.addTo(group);
-                var badge = L.marker([h.lat, h.lng], {{
-                    icon: L.divIcon({{html: h.badge, iconSize: [40, 16], iconAnchor: [20, h.badgeAnchor], className: ""}})
-                }});
-                badge.addTo(group);
-            }});
-        }})();
-        """
-        self.get_root().script.add_child(_RawScript(script), name=self.get_name())
-
-
-# Nombre d'hôtels par lot pour _HotelMarkersLayer : assez grand pour
-# éliminer l'essentiel du coût fixe par instance (voir sa docstring), assez
-# petit pour qu'un seul bloc JSON ne devienne jamais démesuré même si une
-# grande partie des hôtels du lot ont des photos (base64) dans leur popup.
-HOTEL_MARKER_CHUNK_SIZE = 150
 
 
 def booking_badge_html(note) -> str:
@@ -1071,7 +982,6 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
         size_series = hotels_df[size_col].dropna() if size_col in hotels_df.columns else pd.Series(dtype=float)
         size_min, size_max = (size_series.min(), size_series.max()) if not size_series.empty else (0, 1)
         hotel_layer = folium.FeatureGroup(name="Hôtels", show=True)
-        hotel_markers = []
         for _, row in hotels_df.iterrows():
             if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
                 continue
@@ -1090,18 +1000,27 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
                 has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
                 color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
 
-            hotel_markers.append({
-                "lat": row["Latitude"], "lng": row["Longitude"], "radius": radius, "color": color,
-                "tooltip": build_tooltip_html(row, tooltip_fields),
-                "popup": build_popup_html(row),
-                "badge": booking_badge_html(row.get("Note Booking")),
-                "badgeAnchor": int(radius) + 12,
-            })
+            popup_html = build_popup_html(row)
+            folium.CircleMarker(
+                location=[row["Latitude"], row["Longitude"]],
+                radius=radius,
+                color=color,
+                weight=1.5,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.75,
+                tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True, direction="auto"),
+                popup=folium.Popup(popup_html, max_width=POPUP_TEXT_WIDTH_PX + 60),
+            ).add_to(hotel_layer)
+            folium.Marker(
+                location=[row["Latitude"], row["Longitude"]],
+                icon=folium.DivIcon(
+                    html=booking_badge_html(row.get("Note Booking")),
+                    icon_size=(40, 16),
+                    icon_anchor=(20, int(radius) + 12),
+                ),
+            ).add_to(hotel_layer)
         hotel_layer.add_to(m)
-        layer_var = hotel_layer.get_name()
-        for i in range(0, len(hotel_markers), HOTEL_MARKER_CHUNK_SIZE):
-            chunk = hotel_markers[i:i + HOTEL_MARKER_CHUNK_SIZE]
-            _HotelMarkersLayer(layer_var, chunk, POPUP_TEXT_WIDTH_PX + 60).add_to(m)
         _BadgeZoomVisibility(BOOKING_BADGE_MIN_ZOOM).add_to(m)
 
     for layer_name in active_poi_layers:
