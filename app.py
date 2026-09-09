@@ -953,7 +953,16 @@ def sidebar_distance_filter(pois_df: pd.DataFrame):
             st.session_state["distance_filter_on"] = False
 
 
+@st.cache_resource(show_spinner=False)
 def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated=0):
+    # cache_resource (pas cache_data) : l'objet folium.Map contient des
+    # templates Jinja qu'on préfère garder tels quels plutôt que de les
+    # sérialiser/copier à chaque appel (il n'est jamais modifié après sa
+    # construction, donc le réutiliser tel quel entre deux appels identiques
+    # est sans risque). Beaucoup d'interactions qui suivent la construction
+    # de la carte (fermer la galerie photo, cliquer sur une bulle...)
+    # redéclenchent tout le script Streamlit sans que rien ici ne change :
+    # sans ce cache, ça reconstruisait ~1700 bulles + badges à chaque fois.
     center = [31.7917, -7.0926]
     zoom = 5.4
     all_points = hotels_df[["Latitude", "Longitude"]].dropna() if show_hotels else pd.DataFrame(columns=["Latitude", "Longitude"])
