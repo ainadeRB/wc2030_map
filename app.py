@@ -242,6 +242,14 @@ def _main_photo_html(hotel_id, width, style):
 # lettre sur sa propre ligne). Une largeur fixe élimine complètement ce
 # calcul et garantit un retour à la ligne normal, quelle que soit la
 # longueur du texte, sans jamais dépasser le bord de la carte.
+# `white-space:normal` est indispensable ici aussi : Leaflet force
+# temporairement `nowrap` sur SON conteneur (le `.leaflet-tooltip` autour du
+# nôtre) pour mesurer sa taille naturelle avant de figer sa hauteur en
+# pixels — sans notre propre `white-space:normal` explicite, notre `<div>`
+# hériterait ce `nowrap` le temps de cette mesure, Leaflet figerait alors
+# une hauteur d'une seule ligne, et le texte, une fois revenu à un
+# affichage normal sur plusieurs lignes, déborderait du fond blanc devenu
+# trop petit.
 TOOLTIP_TEXT_WIDTH_PX = 220
 POPUP_TEXT_WIDTH_PX = 240
 
@@ -257,7 +265,7 @@ def build_tooltip_html(row, fields):
             text_parts.insert(0, f"<b>{formatted or MISSING_LABEL}</b>")
         else:
             text_parts.append(f"{field} : {value_html}")
-    text_html = f'<div style="width:{TOOLTIP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;">' + "<br>".join(text_parts or [f"<i>{MISSING_LABEL}</i>"]) + "</div>"
+    text_html = f'<div style="width:{TOOLTIP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;white-space:normal;">' + "<br>".join(text_parts or [f"<i>{MISSING_LABEL}</i>"]) + "</div>"
     return (photo_html or "") + text_html
 
 
@@ -286,7 +294,7 @@ def build_popup_html(row):
         f"Risque : {fmt('Risque')}",
         f"Note Booking : {fmt('Note Booking')}",
     ]
-    return f'<div style="width:{POPUP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;">' + "<br>".join(lines) + "</div>"
+    return f'<div style="width:{POPUP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;white-space:normal;">' + "<br>".join(lines) + "</div>"
 
 
 @st.cache_data(show_spinner=False)
