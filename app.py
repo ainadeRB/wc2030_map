@@ -250,8 +250,8 @@ def _main_photo_html(hotel_id, width, style):
 # une hauteur d'une seule ligne, et le texte, une fois revenu à un
 # affichage normal sur plusieurs lignes, déborderait du fond blanc devenu
 # trop petit.
-TOOLTIP_TEXT_WIDTH_PX = 220
-POPUP_TEXT_WIDTH_PX = 240
+TOOLTIP_TEXT_WIDTH_PX = 440
+POPUP_TEXT_WIDTH_PX = 480
 
 
 def build_tooltip_html(row, fields):
@@ -621,8 +621,8 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.75,
-                tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True),
-                popup=folium.Popup(popup_html, max_width=280),
+                tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True, direction="auto"),
+                popup=folium.Popup(popup_html, max_width=POPUP_TEXT_WIDTH_PX + 60),
             ).add_to(hotel_layer)
         hotel_layer.add_to(m)
 
@@ -638,7 +638,7 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
             poi_tooltip = escape_backticks(html_lib.escape(f"{row['Nom']} ({layer_name})"))
             folium.Marker(
                 location=[row["Latitude"], row["Longitude"]],
-                tooltip=folium.Tooltip(poi_tooltip, sticky=True),
+                tooltip=folium.Tooltip(poi_tooltip, sticky=True, direction="auto"),
                 icon=folium.Icon(color="lightgray", icon_color=color, icon=icon, prefix="fa"),
             ).add_to(layer)
         layer.add_to(m)
