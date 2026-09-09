@@ -112,6 +112,66 @@ class _EstimateBanner(folium.MacroElement):
         self._name = "EstimateBanner"
         self.text = text
 
+
+# Zoom minimum à partir duquel les badges "note Booking" apparaissent
+# au-dessus des bulles d'hôtel — en dessous, avec des milliers d'hôtels
+# affichés, ça surchargerait complètement la carte.
+BOOKING_BADGE_MIN_ZOOM = 15
+BOOKING_BADGE_CLASS = "booking-badge-wrap"
+
+
+class _BadgeZoomVisibility(folium.MacroElement):
+    """Affiche/masque les badges "note Booking" (classe BOOKING_BADGE_CLASS)
+    selon le niveau de zoom courant, en CSS pur piloté par une seule classe
+    sur le conteneur de la carte (mise à jour sur l'évènement "zoomend") —
+    plutôt que de parcourir chaque badge un par un à chaque zoom, ce qui
+    serait bien plus coûteux avec des milliers d'hôtels."""
+
+    _template = Template(u"""
+        {% macro header(this, kwargs) %}
+        <style>
+        .leaflet-container:not(.show-booking-badges) .""" + BOOKING_BADGE_CLASS + """ { display: none !important; }
+        </style>
+        {% endmacro %}
+        {% macro script(this, kwargs) %}
+        (function() {
+            var map = {{ this._parent.get_name() }};
+            function updateBadgeVisibility() {
+                var el = map.getContainer();
+                if (map.getZoom() >= {{ this.min_zoom }}) {
+                    el.classList.add("show-booking-badges");
+                } else {
+                    el.classList.remove("show-booking-badges");
+                }
+            }
+            map.on("zoomend", updateBadgeVisibility);
+            updateBadgeVisibility();
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, min_zoom):
+        super().__init__()
+        self._name = "BadgeZoomVisibility"
+        self.min_zoom = min_zoom
+
+
+def booking_badge_html(note) -> str:
+    """Petit badge façon Booking.com (fond bleu, texte blanc, note à une
+    décimale et virgule française) au-dessus d'une bulle d'hôtel ; fond
+    gris clair et "-" pour un hôtel sans note."""
+    has_note = note is not None and not (isinstance(note, float) and pd.isna(note))
+    if has_note:
+        text = f"{float(note):.1f}".replace(".", ",")
+        bg, fg = "#003580", "#ffffff"
+    else:
+        text, bg, fg = "-", "#e0e0e0", "#767676"
+    return (
+        f'<div class="{BOOKING_BADGE_CLASS}" style="display:inline-block;background:{bg};color:{fg};'
+        f'font:700 11px/1.4 Arial,sans-serif;padding:1px 6px;border-radius:4px;'
+        f'white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.35);">{text}</div>'
+    )
+
 HOTEL_INFO_FIELDS = [
     "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
     "Nouveau Statut vérifié", "Capacité act (cha.)", "#Chambres alloues total",
@@ -785,7 +845,16 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
                 tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True, direction="auto"),
                 popup=folium.Popup(popup_html, max_width=POPUP_TEXT_WIDTH_PX + 60),
             ).add_to(hotel_layer)
+            folium.Marker(
+                location=[row["Latitude"], row["Longitude"]],
+                icon=folium.DivIcon(
+                    html=booking_badge_html(row.get("Note Booking")),
+                    icon_size=(40, 16),
+                    icon_anchor=(20, int(radius) + 12),
+                ),
+            ).add_to(hotel_layer)
         hotel_layer.add_to(m)
+        _BadgeZoomVisibility(BOOKING_BADGE_MIN_ZOOM).add_to(m)
 
     for layer_name in active_poi_layers:
         subset = pois_df[pois_df["Couche POI"] == layer_name]
@@ -978,7 +1047,7 @@ def main():
             """
             - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque couche de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale — une couche par type (onglet du fichier POI), et une couche séparée par sous-type quand l'onglet en distingue (ex. sites d'entraînement VSTS / TBC / RBC).
             - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
-            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
+            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs". À partir d'un certain niveau de zoom, un badge façon Booking.com (fond bleu, note à une décimale) apparaît au-dessus de chaque bulle — gris avec un tiret pour un hôtel sans note.
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
             - **Distance / Temps de trajet** : active le filtre, puis choisis la source du point de référence — "Point choisi" (clic sur la carte ou coordonnées saisies, toujours en distance à vol d'oiseau) ou "Point d'intérêt" (permet en plus le temps de trajet réel en voiture). En mode point d'intérêt, choisis d'abord le type (stade, site d'entraînement...), puis la ville si l'onglet en propose une, puis le point précis. En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable. Un bandeau jaune en haut à droite de la carte signale quand des temps affichés sont des estimations interpolées (pas encore de vrai calcul, voir `scripts/estimate_travel_times.py`).
             - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Quand un hôtel a plusieurs photos, cliquer sur sa bulle ouvre aussi la galerie complète juste sous la carte (bouton "✕ Fermer" pour la masquer). Aucune modification du fichier Excel n'est nécessaire.

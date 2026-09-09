@@ -15,6 +15,10 @@ Coupe du Monde 2030 au Maroc.
   - **couleur** selon un critère au choix (classement étoiles ou brut,
     catégorie, statut, ville hôte, signature, risque, visite), avec une
     couleur personnalisable par valeur.
+  - **badge "note Booking"** au-dessus de chaque bulle à partir d'un
+    certain niveau de zoom (fond bleu Booking.com, texte blanc, note à
+    une décimale — ex. "9,8" ; fond gris clair et "-" pour un hôtel sans
+    note), pour ne pas surcharger la carte quand elle est dézoomée.
   La taille/couleur choisies et chaque couleur personnalisée sont
   **sauvegardées automatiquement** (`data/ui_prefs.json`) et retrouvées
   telles quelles au prochain lancement de l'app — pas besoin de refaire
