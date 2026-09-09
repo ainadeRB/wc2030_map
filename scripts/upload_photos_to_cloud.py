@@ -5,7 +5,8 @@ fichier, lui bien versionné dans git, qui permet à la version hébergée
 photos que la version locale — voir src/photos.py.
 
 Usage (à lancer UNE FOIS localement, là où sont les vraies photos, puis à
-nouveau à chaque fois que des photos sont ajoutées/modifiées) :
+nouveau à chaque fois que des photos sont ajoutées/modifiées) — soit via des
+variables d'environnement :
 
     pip install cloudinary
     export CLOUDINARY_CLOUD_NAME=...
@@ -13,9 +14,15 @@ nouveau à chaque fois que des photos sont ajoutées/modifiées) :
     export CLOUDINARY_API_SECRET=...
     python3 scripts/upload_photos_to_cloud.py
 
+soit, plus simple à copier-coller en une seule ligne (utile sous Windows où
+la syntaxe des variables d'environnement diffère), directement en
+arguments :
+
+    python scripts/upload_photos_to_cloud.py --cloud-name ... --api-key ... --api-secret ...
+
 Identifiants gratuits sur https://cloudinary.com (Dashboard, une fois
-inscrit) — jamais à coller dans le code ni sur GitHub, seulement dans ces
-variables d'environnement locales.
+inscrit) — jamais à coller dans le code ni sur GitHub, seulement dans cette
+commande locale.
 
 Une fois terminé :
     git add data/photos_manifest.json
@@ -49,15 +56,20 @@ from src.photos import IMAGE_EXTENSIONS, PHOTOS_DIR, PHOTOS_MANIFEST_PATH  # noq
 UPLOAD_CACHE_PATH = Path("data") / ".photos_upload_cache.json"
 
 
-def _configure_cloudinary():
-    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME")
-    api_key = os.environ.get("CLOUDINARY_API_KEY")
-    api_secret = os.environ.get("CLOUDINARY_API_SECRET")
+def _configure_cloudinary(args):
+    # Priorité aux arguments --cloud-name/--api-key/--api-secret (plus
+    # simples à copier-coller en une ligne, notamment sous Windows où la
+    # syntaxe des variables d'environnement diffère et casse facilement en
+    # cas de collage depuis un texte formaté), sinon repli sur les variables
+    # d'environnement.
+    cloud_name = args.cloud_name or os.environ.get("CLOUDINARY_CLOUD_NAME")
+    api_key = args.api_key or os.environ.get("CLOUDINARY_API_KEY")
+    api_secret = args.api_secret or os.environ.get("CLOUDINARY_API_SECRET")
     if not (cloud_name and api_key and api_secret):
         print(
-            "Variables d'environnement manquantes : CLOUDINARY_CLOUD_NAME, "
-            "CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET (voir le Dashboard sur "
-            "cloudinary.com).",
+            "Identifiants manquants : passe --cloud-name/--api-key/--api-secret, "
+            "ou configure CLOUDINARY_CLOUD_NAME/CLOUDINARY_API_KEY/CLOUDINARY_API_SECRET "
+            "(voir le Dashboard sur cloudinary.com).",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -76,9 +88,12 @@ def _load_json(path: Path) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--force", action="store_true", help="Ré-envoie toutes les photos, même déjà présentes")
+    parser.add_argument("--cloud-name", default=None, help="Identifiant Cloudinary (sinon CLOUDINARY_CLOUD_NAME)")
+    parser.add_argument("--api-key", default=None, help="Clé API Cloudinary (sinon CLOUDINARY_API_KEY)")
+    parser.add_argument("--api-secret", default=None, help="Secret API Cloudinary (sinon CLOUDINARY_API_SECRET)")
     args = parser.parse_args()
 
-    _configure_cloudinary()
+    _configure_cloudinary(args)
     if not PHOTOS_DIR.is_dir():
         print(f"Dossier introuvable : {PHOTOS_DIR}", file=sys.stderr)
         sys.exit(1)
