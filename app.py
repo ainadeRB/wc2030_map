@@ -348,7 +348,7 @@ POPUP_TEXT_WIDTH_PX = 480
 
 
 def build_tooltip_html(row, fields):
-    photo_html, _ = _main_photo_html(row.get("ID"), 160, "display:block;border-radius:4px;margin-bottom:4px;")
+    photo_html, n_photos = _main_photo_html(row.get("ID"), 160, "display:block;border-radius:4px;margin-bottom:4px;")
 
     text_parts = []
     for field in fields:
@@ -358,6 +358,8 @@ def build_tooltip_html(row, fields):
             text_parts.insert(0, f"<b>{formatted or MISSING_LABEL}</b>")
         else:
             text_parts.append(f"{field} : {value_html}")
+    if n_photos > 1:
+        text_parts.append(f'<span style="color:#666;font-size:0.85em;">📸 +{n_photos - 1} photo(s) — clique pour voir</span>')
     text_html = f'<div style="width:{TOOLTIP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;white-space:normal;">' + "<br>".join(text_parts or [f"<i>{MISSING_LABEL}</i>"]) + "</div>"
     return (photo_html or "") + text_html
 
@@ -903,6 +905,25 @@ def main():
     fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated_for_banner)
     map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
                            returned_objects=["last_clicked", "last_object_clicked"])
+
+    # Traité avant tout ce qui peut déclencher un st.rerun() ci-dessous (le
+    # rerun reconstruit la carte avec de nouveaux objets folium, donc de
+    # nouveaux noms internes, ce qui repositionne les couches côté
+    # composant et perd sa valeur "last_object_clicked" avant qu'on ait pu
+    # la lire) : on identifie l'hôtel cliqué tout de suite et on ne garde
+    # que son ID en session, pas la valeur volatile du composant.
+    obj_clicked = map_state.get("last_object_clicked") if map_state else None
+    if obj_clicked:
+        clicked_hotel = find_hotel_at(filtered_df, obj_clicked["lat"], obj_clicked["lng"])
+        if clicked_hotel is not None:
+            st.session_state["selected_hotel_for_gallery"] = str(clicked_hotel.get("ID"))
+
+    selected_id = st.session_state.get("selected_hotel_for_gallery")
+    if selected_id and st.session_state.get("photos_gallery_dismissed_for") != selected_id:
+        selected_rows = filtered_df[filtered_df["ID"].astype(str) == selected_id]
+        if not selected_rows.empty:
+            render_photo_gallery(selected_rows.iloc[0])
+
     if map_state and map_state.get("last_clicked"):
         clicked = map_state["last_clicked"]
         new_point = (clicked["lat"], clicked["lng"])
@@ -914,14 +935,6 @@ def main():
             st.session_state["ref_source"] = REF_SOURCE_MANUAL
             st.session_state["distance_mode"] = "Distance (vol d'oiseau)"
             st.rerun()
-
-    obj_clicked = map_state.get("last_object_clicked") if map_state else None
-    if obj_clicked:
-        clicked_hotel = find_hotel_at(filtered_df, obj_clicked["lat"], obj_clicked["lng"])
-        if clicked_hotel is not None:
-            clicked_id = str(clicked_hotel.get("ID"))
-            if st.session_state.get("photos_gallery_dismissed_for") != clicked_id:
-                render_photo_gallery(clicked_hotel)
 
     st.markdown(f"**Légende couleur : {color_label}**")
     legend_items = [
