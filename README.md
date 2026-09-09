@@ -153,6 +153,33 @@ ouvre en plus une galerie complète (toutes les photos, en grille) juste
 sous la carte — un bouton "✕ Fermer" la masque. Ce dossier n'est **jamais
 versionné dans git**.
 
+### Photos sur la version hébergée (Streamlit Community Cloud)
+
+Un déploiement hébergé n'a pas de disque persistant : `data/photos/` n'y
+existe pas, et un fichier déposé manuellement serait de toute façon effacé
+au moindre redémarrage. Pour que les photos y apparaissent aussi, il faut
+les héberger ailleurs (Cloudinary, gratuit jusqu'à 25 Go) :
+
+```
+pip install cloudinary
+export CLOUDINARY_CLOUD_NAME=...   # Dashboard sur cloudinary.com, gratuit
+export CLOUDINARY_API_KEY=...
+export CLOUDINARY_API_SECRET=...
+python3 scripts/upload_photos_to_cloud.py
+git add data/photos_manifest.json
+git commit -m "Met à jour les photos hébergées"
+git push
+```
+
+Ce script envoie les photos de `data/photos/` vers Cloudinary et écrit
+`data/photos_manifest.json` (juste des URLs, donc versionné sans problème
+même si les photos elles-mêmes sont sensibles). L'app lit ce fichier
+**uniquement** pour un hôtel sans dossier local — la version locale
+continue de lire `data/photos/` directement, sans aucun changement. Relance
+le script après avoir ajouté ou modifié des photos ; les photos déjà
+envoyées ne sont pas ré-envoyées (comparaison par empreinte de contenu),
+ou utilise `--force` pour tout ré-envoyer.
+
 ## Temps de trajet et cache
 
 Le mode "Temps de trajet (voiture)" calcule le temps réel entre le point de
@@ -347,8 +374,10 @@ src/
   styling.py                 # palettes de couleurs, échelle de taille des bulles
 scripts/
   generate_sample_data.py    # génère des données de démonstration
+  upload_photos_to_cloud.py  # envoie data/photos/ vers Cloudinary pour la version hébergée
 data/
   sample_hotels.xlsx
   sample_poi.xlsx
   photos/                    # (optionnel, non versionné) photos par hôtel
+  photos_manifest.json       # (optionnel, versionné) URLs Cloudinary — voir "Photos sur la version hébergée"
 ```

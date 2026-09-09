@@ -16,5 +16,12 @@ data/photos/
 # chaque utilisateur, jamais versionnées.
 data/ui_prefs.json
 
+# Cache local de scripts/upload_photos_to_cloud.py (permet de savoir quelles
+# photos sont déjà envoyées, pour ne pas tout ré-envoyer à chaque fois) :
+# pas utile ailleurs que sur la machine qui envoie les photos. Le résultat
+# utile aux autres (data/photos_manifest.json, juste des URLs) reste
+# versionné, lui.
+data/.photos_upload_cache.json
+
 # Clés API personnelles : jamais versionnées.
 .streamlit/secrets.toml
