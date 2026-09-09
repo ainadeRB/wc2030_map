@@ -551,12 +551,9 @@ def sidebar_distance_filter(pois_df: pd.DataFrame):
         is_travel_time = st.session_state["distance_mode"] == "Temps de trajet (voiture)"
 
         st.session_state["radius_km"] = st.slider(
-            "Rayon de recherche (km, vol d'oiseau)" if is_travel_time else "Rayon (km)",
-            min_value=1, max_value=150, value=st.session_state["radius_km"],
+            "Rayon (km)", min_value=1, max_value=150, value=st.session_state["radius_km"],
         )
         if is_travel_time:
-            st.caption("Pré-filtre toujours appliqué en premier, pour ne calculer le temps de trajet que sur une zone raisonnable.")
-
             st.session_state["max_travel_minutes"] = st.slider(
                 "Temps de trajet max (minutes)", min_value=5, max_value=180,
                 value=st.session_state["max_travel_minutes"], step=5,
@@ -691,8 +688,16 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
         radius_km = st.session_state["radius_km"]
         folium.Marker(location=list(ref_point), icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
                        tooltip="Point de référence").add_to(m)
-        folium.Circle(location=list(ref_point), radius=radius_km * 1000, color="#d62728",
-                       fill=True, fill_opacity=0.05, weight=2).add_to(m)
+        # Purement décoratif : ce cercle ne doit jamais intercepter le
+        # survol/clic des bulles qu'il recouvre, peu importe l'ordre
+        # d'empilement des calques. "interactive" est une option Leaflet
+        # valide mais absente de la liste blanche interne de folium
+        # (path_options ignore silencieusement tout kwarg qu'elle ne
+        # reconnaît pas) — on l'injecte donc directement après coup.
+        search_circle = folium.Circle(location=list(ref_point), radius=radius_km * 1000, color="#d62728",
+                                       fill=True, fill_opacity=0.05, weight=2)
+        search_circle.options["interactive"] = False
+        search_circle.add_to(m)
     elif ref_point:
         folium.Marker(location=list(ref_point), icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
                        tooltip="Point de référence (clic)").add_to(m)
