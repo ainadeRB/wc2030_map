@@ -19,7 +19,10 @@ Coupe du Monde 2030 au Maroc.
     chacune avec sa borne haute et sa couleur éditables (pas à 0,1 près,
     incluse à gauche / exclue à droite sauf la dernière) ; un bouton
     "➕ Ajouter une tranche" permet d'en créer autant que voulu (scinde
-    en deux la tranche la plus large).
+    en deux la tranche la plus large). La couleur des hôtels **sans note
+    Booking du tout** est éditable séparément (gris clair par défaut,
+    plutôt que le gris foncé générique de l'app), et apparaît dans la
+    légende sous "Sans note".
   - **badge "note Booking"** au-dessus de chaque bulle à partir d'un
     certain niveau de zoom (fond bleu Booking.com, texte blanc, note à
     une décimale — ex. "9,8" ; fond gris clair et "-" pour un hôtel sans

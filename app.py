@@ -294,6 +294,8 @@ def hydrate_style_prefs():
         st.session_state.setdefault("booking_band_ids", list(prefs["booking_band_ids"]))
     if "booking_band_next_id" in prefs:
         st.session_state.setdefault("booking_band_next_id", prefs["booking_band_next_id"])
+    if prefs.get("booking_band_missing_color"):
+        st.session_state.setdefault("booking_band_missing_color", prefs["booking_band_missing_color"])
 
 
 def _default_if_unset(key, **defaults):
@@ -360,13 +362,17 @@ def get_poi_color_map(poi_types):
 # pile ne rentrerait dans aucune tranche).
 BOOKING_BAND_DEFAULT_EDGES = [0.0, 6.0, 8.0, 10.0]
 BOOKING_BAND_DEFAULT_COLORS = ["#c62828", "#f9a825", "#2e7d32"]
+# Nettement plus clair que DEFAULT_COLOR (#616161, pensé pour du texte/une
+# bordure) : ici c'est le remplissage d'une bulle entière, un gris aussi
+# foncé écrase visuellement les vraies tranches de couleur à côté.
+BOOKING_BAND_DEFAULT_MISSING_COLOR = "#d9d9d9"
 
 
 def get_booking_bands():
-    """(edges, colors, ids) éditables par l'utilisateur pour la coloration
-    par tranche de note Booking, conservés en session (et sur disque, voir
-    hydrate_style_prefs) — même principe que get_color_map/get_poi_color_map
-    pour les autres critères.
+    """(edges, colors, ids, missing_color) éditables par l'utilisateur pour
+    la coloration par tranche de note Booking, conservés en session (et sur
+    disque, voir hydrate_style_prefs) — même principe que
+    get_color_map/get_poi_color_map pour les autres critères.
 
     `ids` donne à chaque tranche un identifiant STABLE, indépendant de sa
     position dans la liste : les widgets (color_picker, number_input) de
@@ -375,11 +381,15 @@ def get_booking_bands():
     Streamlit, qui garde l'état de chaque widget par sa clé, réaffiche la
     valeur de l'ANCIENNE tranche qui occupait cette position plutôt que la
     nouvelle — un bug bien réel observé lors des tests (les couleurs se
-    décalaient silencieusement d'une tranche après un ajout)."""
+    décalaient silencieusement d'une tranche après un ajout).
+
+    `missing_color` est la couleur des hôtels sans note Booking du tout —
+    éditable séparément, pas figée sur le gris générique de l'app."""
     st.session_state.setdefault("booking_band_edges", list(BOOKING_BAND_DEFAULT_EDGES))
     st.session_state.setdefault("booking_band_colors", list(BOOKING_BAND_DEFAULT_COLORS))
     st.session_state.setdefault("booking_band_ids", list(range(len(BOOKING_BAND_DEFAULT_COLORS))))
     st.session_state.setdefault("booking_band_next_id", len(BOOKING_BAND_DEFAULT_COLORS))
+    st.session_state.setdefault("booking_band_missing_color", BOOKING_BAND_DEFAULT_MISSING_COLOR)
     ids = st.session_state["booking_band_ids"]
     colors = st.session_state["booking_band_colors"]
     # Robustesse : si edges/colors ont été chargés depuis un ui_prefs.json
@@ -389,7 +399,7 @@ def get_booking_bands():
         ids.append(st.session_state["booking_band_next_id"])
         st.session_state["booking_band_next_id"] += 1
     del ids[len(colors):]
-    return st.session_state["booking_band_edges"], colors, ids
+    return st.session_state["booking_band_edges"], colors, ids, st.session_state["booking_band_missing_color"]
 
 
 def _next_booking_band_id():
@@ -452,6 +462,9 @@ def render_booking_band_editor(edges, colors, ids):
             )
             edges[i + 1] = round(new_hi, 1)
         colors[i] = color_col.color_picker("Couleur", colors[i], key=f"booking_band_color_{band_id}")
+
+    st.markdown("**Sans note Booking**")
+    st.color_picker("Couleur", key="booking_band_missing_color")
 
     can_add = any(round(edges[i + 1] - edges[i], 1) >= 0.2 for i in range(n_bands))
     if st.button("➕ Ajouter une tranche", disabled=not can_add, key="add_booking_band"):
@@ -807,8 +820,8 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
 
         if color_mode == "booking_bands":
             values = []
-            edges, colors, ids = get_booking_bands()
-            color_map = {"edges": edges, "colors": colors}
+            edges, colors, ids, missing_color = get_booking_bands()
+            color_map = {"edges": edges, "colors": colors, "missing_color": missing_color}
             with st.expander("🎨 Personnaliser les couleurs", expanded=False):
                 render_booking_band_editor(edges, colors, ids)
         else:
@@ -845,6 +858,9 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
         "booking_band_colors": st.session_state.get("booking_band_colors", []),
         "booking_band_ids": st.session_state.get("booking_band_ids", []),
         "booking_band_next_id": st.session_state.get("booking_band_next_id", 0),
+        "booking_band_missing_color": st.session_state.get(
+            "booking_band_missing_color", BOOKING_BAND_DEFAULT_MISSING_COLOR
+        ),
     })
 
     return show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
@@ -965,7 +981,11 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
             radius = scale_radius(size_value, size_min, size_max) * size_scale if has_size else BASE_DOT_RADIUS
             if color_mode == "booking_bands":
                 band_idx = booking_band_index(row.get("Note Booking"), color_map["edges"])
-                color = color_map["colors"][band_idx] if band_idx is not None else DEFAULT_COLOR
+                color = (
+                    color_map["colors"][band_idx]
+                    if band_idx is not None
+                    else color_map.get("missing_color", DEFAULT_COLOR)
+                )
             else:
                 cat_value = row["Étoiles (estimées)"] if color_mode == "stars" else row.get(color_mode)
                 has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
@@ -1151,6 +1171,7 @@ def main():
             (f"[{edges[i]:.1f} – {edges[i + 1]:.1f}{']' if i == len(colors) - 1 else '['}", colors[i])
             for i in range(len(colors))
         ]
+        legend_items.append(("Sans note", color_map.get("missing_color", DEFAULT_COLOR)))
     else:
         legend_items = [
             (f"{int(v)} ★" if color_mode == "stars" else str(v), c)
