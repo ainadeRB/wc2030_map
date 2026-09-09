@@ -158,6 +158,54 @@ class _BadgeZoomVisibility(folium.MacroElement):
         self.min_zoom = min_zoom
 
 
+class _HotelMarkersLayer(folium.MacroElement):
+    """Toutes les bulles d'hôtel + leurs badges, créées par UN SEUL bloc JS
+    parcourant un tableau de données, au lieu d'un folium.CircleMarker et
+    d'un folium.Marker(DivIcon) par hôtel.
+
+    Pourquoi : chaque objet Folium (CircleMarker, Marker, Popup, Tooltip,
+    DivIcon...) compile son propre template Jinja au moment du rendu, car
+    son contenu (popup/tooltip HTML, différent pour chaque hôtel) est
+    injecté directement dans la SOURCE du template plutôt que passé comme
+    variable. Profilé sur ~1800 hôtels : plus de 10 000 templates Jinja
+    compilés, ~90% du temps total de génération de la carte — pas la
+    construction des objets Python elle-même, qui ne pesait presque rien.
+    Ici, un seul template est compilé (celui de cette classe) ; le contenu
+    variable de chaque hôtel passe en JSON (via le filtre `tojson`, qui
+    échappe correctement pour du JS, y compris les guillemets/backticks/
+    balises `</script>` dans le HTML des popups) plutôt qu'en source de
+    template — d'où le gain."""
+
+    _template = Template(u"""
+        {% macro script(this, kwargs) %}
+        (function() {
+            var group = {{ this.layer_var }};
+            var data = {{ this.markers | tojson }};
+            data.forEach(function(h) {
+                var cm = L.circleMarker([h.lat, h.lng], {
+                    radius: h.radius, color: h.color, weight: 1.5,
+                    fill: true, fillColor: h.color, fillOpacity: 0.75
+                });
+                cm.bindTooltip(h.tooltip, {sticky: true, direction: "auto"});
+                cm.bindPopup(h.popup, {maxWidth: {{ this.popup_max_width }}});
+                cm.addTo(group);
+                var badge = L.marker([h.lat, h.lng], {
+                    icon: L.divIcon({html: h.badge, iconSize: [40, 16], iconAnchor: [20, h.badgeAnchor], className: ""})
+                });
+                badge.addTo(group);
+            });
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, layer_var, markers, popup_max_width):
+        super().__init__()
+        self._name = "HotelMarkersLayer"
+        self.layer_var = layer_var
+        self.markers = markers
+        self.popup_max_width = popup_max_width
+
+
 def booking_badge_html(note) -> str:
     """Petit badge façon Booking.com (fond bleu, texte blanc, note à une
     décimale et virgule française) au-dessus d'une bulle d'hôtel ; fond
@@ -982,6 +1030,7 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
         size_series = hotels_df[size_col].dropna() if size_col in hotels_df.columns else pd.Series(dtype=float)
         size_min, size_max = (size_series.min(), size_series.max()) if not size_series.empty else (0, 1)
         hotel_layer = folium.FeatureGroup(name="Hôtels", show=True)
+        hotel_markers = []
         for _, row in hotels_df.iterrows():
             if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
                 continue
@@ -1000,27 +1049,15 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
                 has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
                 color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
 
-            popup_html = build_popup_html(row)
-            folium.CircleMarker(
-                location=[row["Latitude"], row["Longitude"]],
-                radius=radius,
-                color=color,
-                weight=1.5,
-                fill=True,
-                fill_color=color,
-                fill_opacity=0.75,
-                tooltip=folium.Tooltip(escape_backticks(build_tooltip_html(row, tooltip_fields)), sticky=True, direction="auto"),
-                popup=folium.Popup(popup_html, max_width=POPUP_TEXT_WIDTH_PX + 60),
-            ).add_to(hotel_layer)
-            folium.Marker(
-                location=[row["Latitude"], row["Longitude"]],
-                icon=folium.DivIcon(
-                    html=booking_badge_html(row.get("Note Booking")),
-                    icon_size=(40, 16),
-                    icon_anchor=(20, int(radius) + 12),
-                ),
-            ).add_to(hotel_layer)
+            hotel_markers.append({
+                "lat": row["Latitude"], "lng": row["Longitude"], "radius": radius, "color": color,
+                "tooltip": build_tooltip_html(row, tooltip_fields),
+                "popup": build_popup_html(row),
+                "badge": booking_badge_html(row.get("Note Booking")),
+                "badgeAnchor": int(radius) + 12,
+            })
         hotel_layer.add_to(m)
+        _HotelMarkersLayer(hotel_layer.get_name(), hotel_markers, POPUP_TEXT_WIDTH_PX + 60).add_to(m)
         _BadgeZoomVisibility(BOOKING_BADGE_MIN_ZOOM).add_to(m)
 
     for layer_name in active_poi_layers:
