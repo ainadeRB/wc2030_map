@@ -104,12 +104,19 @@ def load_hotels(file_or_path) -> pd.DataFrame:
 
     # Doublons d'ID : on garde la ligne géolocalisée en priorité (un ID avec
     # une ligne vide + une ligne renseignée ne doit pas perdre la localisation).
-    if df["ID"].notna().any():
-        df = (
-            df.sort_values("Géolocalisé", ascending=False, kind="stable")
+    # Ne s'applique qu'aux lignes qui ONT un ID : pandas traite plusieurs ID
+    # manquants (NaN) comme des doublons entre eux, donc dédupliquer sans
+    # exclure les ID vides ferait disparaître tous les hôtels sans ID sauf
+    # un seul, alors que ce sont potentiellement des hôtels bien distincts
+    # qui n'ont simplement pas encore d'ID renseigné.
+    has_id = df["ID"].notna()
+    if has_id.any():
+        with_id = (
+            df[has_id]
+            .sort_values("Géolocalisé", ascending=False, kind="stable")
             .drop_duplicates(subset="ID", keep="first")
-            .sort_index()
         )
+        df = pd.concat([with_id, df[~has_id]]).sort_index()
 
     return df
 
