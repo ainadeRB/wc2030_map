@@ -115,8 +115,8 @@ class _EstimateBanner(folium.MacroElement):
 HOTEL_INFO_FIELDS = [
     "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
     "Nouveau Statut vérifié", "Capacité act (cha.)", "#Chambres alloues total",
-    "PMC vérif", "Propriétaire", "Opérateur", "Signature", "Signature Prop",
-    "Signature Op", "Risque", "Visite", "Note Booking", "ID",
+    "Allocations", "PMC vérif", "Propriétaire", "Opérateur", "Signature",
+    "Signature Prop", "Signature Op", "Risque", "Visite", "Note Booking", "ID",
 ]
 DEFAULT_TOOLTIP_FIELDS = [
     "Nom", "Ville hôte", "Nouveau classement assimilé", "Capacité act (cha.)", "Nouveau Statut vérifié",
@@ -384,6 +384,7 @@ def build_popup_html(row):
         f"Statut : {fmt('Nouveau Statut vérifié')}",
         f"Capacité : {fmt('Capacité act (cha.)', ' ch.')}",
         f"Chambres allouées : {fmt('#Chambres alloues total')}",
+        f"Allocations : {fmt('Allocations')}",
         f"PMC : {fmt('PMC vérif', ' MAD')}",
         f"Signature : {fmt('Signature')}",
         f"Risque : {fmt('Risque')}",
@@ -951,8 +952,8 @@ def main():
     display_cols = [c for c in [
         "ID", "Nom", "Ville hôte", "Ville", "Catégorie", "Nouveau classement assimilé",
         "Nouveau Statut vérifié", "Capacité act (cha.)", "#Chambres alloues total",
-        "PMC vérif", "Signature", "Risque", "Visite", "Note Booking", "Distance (km)",
-        "Temps de trajet (min)",
+        "Allocations", "PMC vérif", "Signature", "Risque", "Visite", "Note Booking",
+        "Distance (km)", "Temps de trajet (min)",
     ] if c in filtered_df.columns]
     st.dataframe(filtered_df[display_cols].sort_values(display_cols[0]), width="stretch", height=350)
 

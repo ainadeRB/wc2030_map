@@ -34,6 +34,10 @@ Coupe du Monde 2030 au Maroc.
 - **Infos au survol configurables** : choisis les champs affichés dans
   l'infobulle ; le clic affiche toujours la fiche complète. Un champ sans
   valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
+  Le champ "Allocations" résume automatiquement les groupes auxquels
+  l'hôtel a des chambres allouées (VSTH, TBCTH, FIFA HQ, FIFA VIP, FIFA
+  Venue, RBC, Com, Hospi, HB, Media, IBC — colonnes déjà présentes dans le
+  fichier), sans avoir à maintenir une colonne à part.
 - **Photos** : une vignette par hôtel au survol, une version plus grande au
   clic ; si l'hôtel a plusieurs photos, cliquer sur sa bulle ouvre aussi la
   **galerie complète** juste sous la carte — voir

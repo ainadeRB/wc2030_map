@@ -1,4 +1,6 @@
 """Chargement et nettoyage des fichiers Excel Hôtels / Points d'intérêt."""
+import re
+
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -29,6 +31,26 @@ DATE_COLUMNS = ["Date ouverture", "Date dernière réno", "Date prochaine réno"
 
 # Bornes larges du Maroc, pour repérer des coordonnées visiblement fausses
 MOROCCO_BOUNDS = {"lat": (20.0, 36.5), "lon": (-17.5, -0.5)}
+
+
+# "1.VSTH" -> "VSTH", "3. FIFA HQ" -> "FIFA HQ" : le numéro d'ordre du
+# fichier source n'a pas sa place dans un résumé lisible à l'écran.
+def _strip_allocation_prefix(col: str) -> str:
+    return re.sub(r"^\d+\.\s*", "", col)
+
+
+def _format_allocations(row) -> "str | float":
+    """Résumé lisible ("VSTH : 12 · FIFA VIP : 4") des groupes auxquels un
+    hôtel a des chambres allouées, à partir des colonnes ALLOCATION_COLUMNS
+    déjà présentes dans le fichier — ne montre que les groupes avec une
+    valeur non nulle, plutôt que d'obliger à maintenir une colonne à part
+    dans Excel."""
+    parts = [
+        f"{_strip_allocation_prefix(col)} : {int(row[col])}"
+        for col in ALLOCATION_COLUMNS
+        if pd.notna(row[col]) and row[col] > 0
+    ]
+    return " · ".join(parts) if parts else np.nan
 
 
 def _find_col(columns, *candidates):
@@ -72,6 +94,8 @@ def load_hotels(file_or_path) -> pd.DataFrame:
 
     if df["#Chambres alloues total"].isna().all() or (df["#Chambres alloues total"] == 0).all():
         df["#Chambres alloues total"] = df[ALLOCATION_COLUMNS].sum(axis=1, min_count=1)
+
+    df["Allocations"] = df.apply(_format_allocations, axis=1)
 
     for col in ["Ville", "Ville hôte", "Nom", "Catégorie", "Nouveau classement assimilé",
                 "Nouveau Statut vérifié", "Propriétaire", "Opérateur", "Signature Prop",
