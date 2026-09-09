@@ -15,12 +15,17 @@ Coupe du Monde 2030 au Maroc.
   - **couleur** selon un critère au choix (classement étoiles ou brut,
     catégorie, statut, ville hôte, signature, risque, visite), avec une
     couleur personnalisable par valeur.
+  La taille/couleur choisies et chaque couleur personnalisée sont
+  **sauvegardées automatiquement** (`data/ui_prefs.json`) et retrouvées
+  telles quelles au prochain lancement de l'app — pas besoin de refaire
+  ses couleurs à chaque redémarrage.
 - **Couches activables/désactivables** : hôtels, et une couche par type de
   point d'intérêt (un onglet du fichier POI) — quand un onglet distingue des
   sous-catégories (ex. les sites d'entraînement "VSTS" / "TBC" / "RBC"),
   chacune devient sa propre couche, activable indépendamment. Couleur de
   chaque type de point d'intérêt personnalisable (icône automatiquement
-  noire ou blanche selon la couleur choisie, pour rester lisible).
+  noire ou blanche selon la couleur choisie, pour rester lisible) —
+  également sauvegardée automatiquement.
 - **Filtres sur (quasiment) toutes les colonnes** du fichier hôtels : ville
   hôte, ville, catégorie, classement, statut, propriétaire, opérateur,
   signatures, risque, visite, capacité, prix moyen (PMC), chambres

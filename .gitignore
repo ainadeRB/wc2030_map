@@ -12,5 +12,9 @@ data/travel_time_cache.json
 data/travel_time_estimates.json
 data/photos/
 
+# Préférences d'affichage locales (taille/couleur des bulles) : propres à
+# chaque utilisateur, jamais versionnées.
+data/ui_prefs.json
+
 # Clés API personnelles : jamais versionnées.
 .streamlit/secrets.toml

@@ -4,6 +4,7 @@ et points d'intérêt (stades, sites d'entraînement, aéroports...).
 Lancer avec : streamlit run app.py
 """
 import html as html_lib
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -37,6 +38,10 @@ DEFAULT_POIS = DATA_DIR / "sample_poi.xlsx"
 # Fichiers réels de l'utilisateur : écrasés à chaque upload, conservés entre les sessions.
 HOTELS_PERSIST_PATH = DATA_DIR / "hotels.xlsx"
 POIS_PERSIST_PATH = DATA_DIR / "poi.xlsx"
+# Préférences d'affichage (taille/couleur des bulles) : réécrit à chaque
+# changement, pour ne pas avoir à refaire ses couleurs à chaque redémarrage
+# de l'app (la session Streamlit, elle, ne survit pas à un redémarrage).
+UI_PREFS_PATH = DATA_DIR / "ui_prefs.json"
 
 COLOR_MODES = {
     "Nouveau classement assimilé (étoiles)": "stars",
@@ -163,7 +168,75 @@ REF_SOURCE_MANUAL = "Point choisi (clic sur la carte ou coordonnées)"
 REF_SOURCE_POI = "Point d'intérêt"
 
 
+# Clés de session_state persistées sur disque pour la taille/couleur des
+# bulles (voir load_ui_prefs/save_ui_prefs) : simples (une valeur), les
+# "colormap_*" (une par critère de couleur déjà utilisé, dynamiques) sont
+# gérées à part car leur nombre dépend de ce que l'utilisateur a exploré.
+STYLE_PREF_KEYS = ["size_mode", "size_scale", "color_mode_label"]
+
+
+def load_ui_prefs() -> dict:
+    if UI_PREFS_PATH.exists():
+        try:
+            return json.loads(UI_PREFS_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def save_ui_prefs(prefs: dict) -> None:
+    try:
+        UI_PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        UI_PREFS_PATH.write_text(json.dumps(prefs))
+    except OSError:
+        pass
+
+
+def _decode_color_map(color_mode: str, saved_map: dict) -> dict:
+    """Les clés d'un dict de couleurs redeviennent des chaînes après un
+    aller-retour JSON ; le mode "stars" a besoin de vraies clés entières
+    pour matcher les valeurs (déjà des int/float) issues du dataframe."""
+    if color_mode != "stars":
+        return dict(saved_map)
+    decoded = {}
+    for k, v in saved_map.items():
+        try:
+            decoded[int(float(k))] = v
+        except (TypeError, ValueError):
+            continue
+    return decoded
+
+
+def hydrate_style_prefs():
+    """Pré-remplit session_state avec les préférences de taille/couleur des
+    bulles sauvegardées sur disque, avant que les widgets correspondants ne
+    soient créés — pour que l'app redémarre exactement comme l'utilisateur
+    l'a laissée plutôt qu'avec les couleurs par défaut."""
+    if st.session_state.get("_style_prefs_hydrated"):
+        return
+    st.session_state["_style_prefs_hydrated"] = True
+    prefs = load_ui_prefs()
+    for key in STYLE_PREF_KEYS:
+        if key in prefs:
+            st.session_state.setdefault(key, prefs[key])
+    for state_key, saved_map in prefs.get("colormaps", {}).items():
+        color_mode = state_key[len("colormap_"):] if state_key.startswith("colormap_") else state_key
+        st.session_state.setdefault(state_key, _decode_color_map(color_mode, saved_map))
+    if "poi_colormap" in prefs:
+        st.session_state.setdefault("poi_colormap", dict(prefs["poi_colormap"]))
+
+
+def _default_if_unset(key, **defaults):
+    """kwargs de valeur par défaut d'un widget, seulement si sa clé n'est
+    pas déjà dans session_state — évite l'avertissement Streamlit sur une
+    valeur par défaut redondante avec une clé déjà pré-remplie (ex. via
+    hydrate_style_prefs), sans perdre le défaut sensé pour un tout nouvel
+    utilisateur qui n'a encore aucune préférence sauvegardée."""
+    return {} if key in st.session_state else defaults
+
+
 def init_state():
+    hydrate_style_prefs()
     st.session_state.setdefault("ref_point", None)
     st.session_state.setdefault("ref_source", REF_SOURCE_MANUAL)
     st.session_state.setdefault("radius_km", 15)
@@ -486,13 +559,13 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
 
         st.markdown("**Taille des bulles**")
         size_options = dict(NUMERIC_FILTERS)
-        size_label = st.selectbox("Taille selon", list(size_options.keys()), index=0, key="size_mode")
+        size_label = st.selectbox("Taille selon", list(size_options.keys()), key="size_mode", **_default_if_unset("size_mode", index=0))
         size_col = size_options[size_label]
-        size_scale = st.slider("Échelle des bulles", min_value=0.4, max_value=3.0, value=1.0, step=0.1, key="size_scale")
+        size_scale = st.slider("Échelle des bulles", min_value=0.4, max_value=3.0, step=0.1, key="size_scale", **_default_if_unset("size_scale", value=1.0))
         st.caption("Un hôtel sans valeur pour ce champ garde un petit point de taille fixe, quelle que soit l'échelle.")
 
         st.markdown("**Style des bulles**")
-        color_label = st.selectbox("Couleur selon", list(COLOR_MODES.keys()), index=0)
+        color_label = st.selectbox("Couleur selon", list(COLOR_MODES.keys()), key="color_mode_label", **_default_if_unset("color_mode_label", index=0))
         color_mode = COLOR_MODES[color_label]
 
         if color_mode == "stars":
@@ -516,6 +589,15 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
             "Champs affichés en survolant un hôtel", HOTEL_INFO_FIELDS,
             default=DEFAULT_TOOLTIP_FIELDS, key="tooltip_fields",
         )
+
+    # Sauvegarde sur disque de la taille/couleur des bulles à chaque
+    # interaction, pour retrouver exactement la même config après un
+    # redémarrage de l'app plutôt que de devoir refaire ses couleurs.
+    save_ui_prefs({
+        **{k: st.session_state[k] for k in STYLE_PREF_KEYS if k in st.session_state},
+        "colormaps": {k: v for k, v in st.session_state.items() if k.startswith("colormap_")},
+        "poi_colormap": st.session_state.get("poi_colormap", {}),
+    })
 
     return show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
 
