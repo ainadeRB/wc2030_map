@@ -239,26 +239,53 @@ déjà réellement calculés, sans aucun appel réseau :
 python scripts/estimate_travel_times.py
 ```
 
-Le script calibre 7 modèles (temps ≈ ordonnée à l'origine + pente × distance
-à vol d'oiseau), un par tranche de distance, plutôt qu'une seule droite
-globale : la relation distance → temps n'est pas la même en ville qu'à
-l'approche de trajets d'autoroute. Tranches : 0-1, 1-3, 3-5, 5-10, 10-20,
-20-50, 50-150 km (au-delà de 150 km — hors de la plage réellement utilisée
-par le filtre de l'app — la dernière tranche est réutilisée par
-extrapolation). Chaque tranche est calibrée séparément sur les paires
-hôtel/POI déjà réellement mesurées dans `data/travel_time_cache.json` qui
-tombent dans cette tranche. La tranche 0-1 km est forcée de passer par
-l'origine (0 m = 0 min pile, une centaine de mètres ne fait que quelques
-secondes) : en dessous d'1 km il n'y a pas de raison d'avoir un temps
-incompressible. Les tranches suivantes sont raccordées entre elles (le
-temps prédit à la borne basse d'une tranche est toujours égal à celui
-prédit à la borne haute de la précédente), pour obtenir une courbe globale
-continue et strictement croissante plutôt que 7 morceaux qui pourraient se
-contredire. Une tranche sans assez de données réelles (< 5 paires pour la
-première, < 8 pour les autres) retombe sur une vitesse générique par
-défaut, croissante avec la distance (18 à 100 km/h selon la tranche, pour
-refléter route en ville vs autoroute), toujours raccordée à la tranche
-précédente. Les estimations vont dans un fichier **séparé**,
+Le script calibre l'estimation à deux niveaux, du plus précis au plus
+générique :
+
+1. **Par couple de villes**, en priorité : quand assez de vraies paires
+   (par défaut 5 minimum) existent déjà entre une ville de POI et une
+   ville d'hôtel données (ex. Casablanca → Casablanca), une vitesse
+   moyenne propre à ce couple est calculée et utilisée pour les trajets
+   manquants du même couple — ça capture les écarts de trafic locaux
+   (une grande ville congestionnée n'a pas la même vitesse effective
+   qu'une zone rurale à distance égale) qu'un modèle basé uniquement sur
+   la distance ne peut pas voir. La ville de chaque point (hôtel ou POI)
+   est déterminée par proximité géographique au centroïde de chaque ville
+   hôte (moyenne des coordonnées des hôtels qui lui sont rattachés), pas
+   par un champ "Ville" textuel : ce champ est absent de certains onglets
+   du fichier POI (ex. les stades) et incohérent d'un onglet à l'autre —
+   la proximité géographique fonctionne pour tous les points, sans
+   exception. Cette vitesse par couple ne s'applique que jusqu'à une
+   marge raisonnable (+30 %) au-delà de la distance réelle la plus longue
+   observée pour ce couple précis, pour ne jamais l'extrapoler vers des
+   trajets bien plus longs que tout ce qui a servi à la calibrer (ex. un
+   hôtel très excentré rattaché à une ville hôte n'est plus vraiment un
+   trajet "urbain").
+2. **Par tranche de distance**, en repli : pour un couple de villes sans
+   assez de données réelles (ou une distance dépassant la marge
+   ci-dessus), le script retombe sur 7 modèles (temps ≈ ordonnée à
+   l'origine + pente × distance à vol d'oiseau), un par tranche de
+   distance, plutôt qu'une seule droite globale : la relation distance →
+   temps n'est pas la même en ville qu'à l'approche de trajets
+   d'autoroute. Tranches : 0-1, 1-3, 3-5, 5-10, 10-20, 20-50, 50-150 km
+   (au-delà de 150 km — hors de la plage réellement utilisée par le
+   filtre de l'app — la dernière tranche est réutilisée par
+   extrapolation). Chaque tranche est calibrée séparément sur les paires
+   hôtel/POI déjà réellement mesurées dans `data/travel_time_cache.json`
+   qui tombent dans cette tranche. La tranche 0-1 km est forcée de passer
+   par l'origine (0 m = 0 min pile, une centaine de mètres ne fait que
+   quelques secondes) : en dessous d'1 km il n'y a pas de raison d'avoir
+   un temps incompressible. Les tranches suivantes sont raccordées entre
+   elles (le temps prédit à la borne basse d'une tranche est toujours
+   égal à celui prédit à la borne haute de la précédente), pour obtenir
+   une courbe globale continue et strictement croissante plutôt que 7
+   morceaux qui pourraient se contredire. Une tranche sans assez de
+   données réelles (< 5 paires pour la première, < 8 pour les autres)
+   retombe sur une vitesse générique par défaut, croissante avec la
+   distance (18 à 100 km/h selon la tranche, pour refléter route en ville
+   vs autoroute), toujours raccordée à la tranche précédente.
+
+Les estimations vont dans un fichier **séparé**,
 `data/travel_time_estimates.json` — jamais dans le cache réel :
 `precompute_travel_times.py` l'ignore complètement et continue de chercher
 de vraies valeurs pour tout ce qui manque quand le quota se renouvelle.

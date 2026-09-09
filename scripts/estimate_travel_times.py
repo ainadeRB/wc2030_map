@@ -3,11 +3,28 @@ trajets déjà RÉELLEMENT calculés (dans data/travel_time_cache.json, rempli
 par precompute_travel_times.py), puis l'applique pour estimer tous les autres
 trajets hôtel × point d'intérêt qui n'ont pas encore de valeur réelle.
 
-Le modèle est découpé en 7 TRANCHES de distance, chacune avec sa propre
-droite (temps ≈ a + b × distance), plutôt qu'une seule droite globale : la
-relation distance → temps n'est pas linéaire sur toute la plage (ville,
-route, autoroute n'ont pas la même vitesse effective). Les tranches :
-0-1 km, 1-3 km, 3-5 km, 5-10 km, 10-20 km, 20-50 km, 50-150 km.
+Deux niveaux de calibration, du plus précis au plus générique :
+
+1. **Par couple de villes** : quand assez de vraies paires existent déjà
+   entre une ville de POI et une ville d'hôtel données (ex. Casablanca →
+   Casablanca), on calibre une vitesse moyenne propre à CE couple de
+   villes et on estime les trajets manquants du même couple avec elle. Ça
+   capture les écarts de trafic locaux (une grande ville congestionnée
+   n'a pas la même vitesse effective qu'une zone rurale à distance égale)
+   qu'un modèle basé uniquement sur la distance ne peut pas voir. La ville
+   de chaque point (hôtel ou POI) est déterminée par proximité géographique
+   au centroïde de chaque ville hôte (moyenne des coordonnées des hôtels
+   qui lui sont rattachés) plutôt que par un champ "Ville" textuel : ce
+   champ est absent de certains onglets du fichier POI (ex. les stades) et
+   incohérent d'un onglet à l'autre (ex. "Casa" vs "Casablanca") — la
+   proximité géographique fonctionne pour tous les points, sans exception.
+2. **Par tranche de distance** (repli) : pour un couple de villes sans
+   assez de données réelles, on retombe sur un modèle en 7 TRANCHES de
+   distance, chacune avec sa propre droite (temps ≈ a + b × distance),
+   plutôt qu'une seule droite globale : la relation distance → temps n'est
+   pas linéaire sur toute la plage (ville, route, autoroute n'ont pas la
+   même vitesse effective). Les tranches : 0-1 km, 1-3 km, 3-5 km, 5-10 km,
+   10-20 km, 20-50 km, 50-150 km.
 
 La tranche 0-1 km passe obligatoirement par l'origine (0 m = 0 min pile) :
 en dessous d'1 km on est forcément en trajet local, donc pas de temps
@@ -92,6 +109,101 @@ MIN_SLOPE_MIN_PER_KM = 60.0 / MAX_PLAUSIBLE_SPEED_KMH
 # (ville → route → autoroute), pour un comportement réaliste par défaut en
 # attendant que precompute_travel_times.py ait couvert davantage de trajets.
 FALLBACK_SPEEDS_KMH = [18.0, 25.0, 30.0, 40.0, 55.0, 80.0, 100.0]
+
+# Nombre minimum de vraies paires requis entre un couple de villes donné
+# pour lui faire confiance plutôt que de retomber sur le modèle générique
+# par tranche de distance — un couple avec seulement 1 ou 2 paires ne
+# donnerait qu'un bruit de mesure, pas une vitesse locale fiable.
+MIN_PAIRS_PER_CITY_PAIR = 5
+
+
+def compute_city_centroids(hotels: pd.DataFrame) -> dict:
+    """Centroïde (lat, lon) de chaque ville hôte, à partir des hôtels
+    géolocalisés qui lui sont rattachés (colonne "Ville hôte"). Sert de
+    référence pour déterminer la ville la plus proche de n'importe quel
+    point (hôtel ou POI), y compris ceux sans champ "Ville" exploitable."""
+    if "Ville hôte" not in hotels.columns:
+        return {}
+    valid = hotels.dropna(subset=["Ville hôte", "Latitude", "Longitude"])
+    return {
+        city: (group["Latitude"].mean(), group["Longitude"].mean())
+        for city, group in valid.groupby("Ville hôte")
+    }
+
+
+def nearest_city(lat: float, lon: float, centroids: dict):
+    """Ville hôte la plus proche de (lat, lon) à vol d'oiseau, ou None si
+    aucun centroïde n'est disponible."""
+    if not centroids:
+        return None
+    return min(centroids, key=lambda city: haversine_km(lat, lon, *centroids[city]))
+
+
+# Un hôtel rattaché à une ville hôte peut être physiquement loin de son
+# centre (grande banlieue, zone rurale) : appliquer la vitesse calibrée
+# "trafic urbain" d'un couple de villes à une distance bien plus grande que
+# tout ce qui a servi à la calibrer serait une extrapolation hasardeuse
+# (ex. un trajet de 47 km dans un couple calibré sur des trajets de 5-15 km
+# n'est probablement plus un trajet urbain mais implique de la route/
+# autoroute). On limite donc l'usage de la vitesse d'un couple à une marge
+# raisonnable au-delà de la distance réelle la plus longue observée pour ce
+# couple ; au-delà, repli sur le modèle générique par tranche.
+CITY_PAIR_EXTRAPOLATION_MARGIN = 1.3
+
+
+def build_city_pair_speeds(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict, centroids: dict):
+    """Calcule, pour chaque couple (ville du POI, ville de l'hôtel) avec
+    assez de vraies paires mesurées, une vitesse moyenne implicite (km/h)
+    propre à ce couple — pondérée par la distance de chaque paire, pour ne
+    pas laisser un seul trajet très court dominer la moyenne. Retourne
+    {(ville_poi, ville_hotel): (vitesse_kmh, n_paires, distance_max_observée)}."""
+    max_dist = DISTANCE_BANDS[-1][1]
+    pair_dist_sum: dict = {}
+    pair_minutes_sum: dict = {}
+    pair_n: dict = {}
+    pair_max_dist: dict = {}
+
+    for _, poi in pois.iterrows():
+        try:
+            lat, lon = float(poi["Latitude"]), float(poi["Longitude"])
+        except (TypeError, ValueError):
+            continue
+        okey = _origin_key(lat, lon)
+        bucket = cache.get(okey)
+        if not bucket:
+            continue
+        poi_city = nearest_city(lat, lon, centroids)
+        if poi_city is None:
+            continue
+        for _, hotel in hotels.iterrows():
+            hid = str(hotel["ID"])
+            minutes = bucket.get(hid)
+            if minutes is None:
+                continue
+            hotel_city = hotel.get("Ville hôte")
+            if hotel_city is None or (isinstance(hotel_city, float) and pd.isna(hotel_city)):
+                hotel_city = nearest_city(hotel["Latitude"], hotel["Longitude"], centroids)
+            if hotel_city is None:
+                continue
+            dist = haversine_km(lat, lon, hotel["Latitude"], hotel["Longitude"])
+            if dist <= 0 or dist > max_dist:
+                continue
+            speed = dist / (minutes / 60)
+            if not (MIN_PLAUSIBLE_SPEED_KMH <= speed <= MAX_PLAUSIBLE_SPEED_KMH):
+                continue
+            key = (poi_city, hotel_city)
+            pair_dist_sum[key] = pair_dist_sum.get(key, 0.0) + dist
+            pair_minutes_sum[key] = pair_minutes_sum.get(key, 0.0) + minutes
+            pair_n[key] = pair_n.get(key, 0) + 1
+            pair_max_dist[key] = max(pair_max_dist.get(key, 0.0), dist)
+
+    city_pair_speeds = {}
+    for key, n in pair_n.items():
+        if n < MIN_PAIRS_PER_CITY_PAIR:
+            continue
+        speed_kmh = pair_dist_sum[key] / (pair_minutes_sum[key] / 60.0)
+        city_pair_speeds[key] = (speed_kmh, n, pair_max_dist[key])
+    return city_pair_speeds
 
 
 def build_training_pairs(hotels: pd.DataFrame, pois: pd.DataFrame, cache: dict):
@@ -205,10 +317,36 @@ def fit_bands(distances: np.ndarray, minutes: np.ndarray):
     return models
 
 
-def predict_minutes(models, dist: float) -> float:
+def predict_minutes(models, dist: float, city_pair_speeds: dict = None, city_key=None) -> float:
+    """Estime le temps (min) pour une distance donnée : priorité à la
+    vitesse calibrée pour ce couple de villes précis (city_key) si elle
+    existe ET que `dist` reste dans une marge raisonnable de ce qui a
+    servi à la calibrer (pas d'extrapolation hasardeuse vers une distance
+    jamais observée pour ce couple), sinon repli sur le modèle générique
+    par tranche de distance."""
+    if city_pair_speeds and city_key in city_pair_speeds:
+        speed_kmh, _, max_dist_observed = city_pair_speeds[city_key]
+        if dist <= max_dist_observed * CITY_PAIR_EXTRAPOLATION_MARGIN:
+            return max(0.0, dist / speed_kmh * 60.0)
     band = assign_band(dist)
     m = models[band]
     return max(0.0, m["a"] + m["b"] * dist)
+
+
+def print_city_pair_report(city_pair_speeds: dict):
+    if not city_pair_speeds:
+        print("\nAucun couple de villes n'a assez de vraies paires (min. "
+              f"{MIN_PAIRS_PER_CITY_PAIR}) pour une calibration dédiée — "
+              "modèle générique par tranche utilisé partout pour l'instant.")
+        return
+    print(f"\nVitesses calibrées par couple de villes ({len(city_pair_speeds)} couple(s), "
+          f"min. {MIN_PAIRS_PER_CITY_PAIR} paires réelles) :")
+    for (city_poi, city_hotel), (speed_kmh, n, max_dist_observed) in sorted(city_pair_speeds.items(), key=lambda kv: -kv[1][1]):
+        arrow = "trajets internes" if city_poi == city_hotel else "→"
+        label = f"{city_poi} ({arrow})" if city_poi == city_hotel else f"{city_poi} → {city_hotel}"
+        applies_up_to = max_dist_observed * CITY_PAIR_EXTRAPOLATION_MARGIN
+        print(f"  - {label:<35} {speed_kmh:.0f} km/h implicite ({n} paire(s) réelle(s), "
+              f"appliqué jusqu'à ~{applies_up_to:.0f} km)")
 
 
 def print_report(models, known_pois):
@@ -253,9 +391,14 @@ def main():
     models = fit_bands(distances, minutes)
     print_report(models, known_pois)
 
+    centroids = compute_city_centroids(geolocated)
+    city_pair_speeds = build_city_pair_speeds(geolocated, pois, cache, centroids)
+    print_city_pair_report(city_pair_speeds)
+
     estimates = json.loads(ESTIMATES_PATH.read_text()) if ESTIMATES_PATH.exists() else {}
     n_total_estimated = 0
     n_total_real = 0
+    n_via_city_pair = 0
     for _, poi in pois.iterrows():
         try:
             lat, lon = float(poi["Latitude"]), float(poi["Longitude"])
@@ -264,20 +407,29 @@ def main():
         okey = _origin_key(lat, lon)
         real_bucket = cache.get(okey, {})
         est_bucket = estimates.setdefault(okey, {})
+        poi_city = nearest_city(lat, lon, centroids)
         for _, hotel in geolocated.iterrows():
             hid = str(hotel["ID"])
             if real_bucket.get(hid) is not None:
                 n_total_real += 1
                 continue
             dist = haversine_km(lat, lon, hotel["Latitude"], hotel["Longitude"])
-            est_bucket[hid] = round(predict_minutes(models, dist), 1)
+            hotel_city = hotel.get("Ville hôte")
+            if hotel_city is None or (isinstance(hotel_city, float) and pd.isna(hotel_city)):
+                hotel_city = nearest_city(hotel["Latitude"], hotel["Longitude"], centroids)
+            city_key = (poi_city, hotel_city)
+            if city_key in city_pair_speeds and dist <= city_pair_speeds[city_key][2] * CITY_PAIR_EXTRAPOLATION_MARGIN:
+                n_via_city_pair += 1
+            est_bucket[hid] = round(predict_minutes(models, dist, city_pair_speeds, city_key), 1)
             n_total_estimated += 1
 
     ESTIMATES_PATH.parent.mkdir(parents=True, exist_ok=True)
     ESTIMATES_PATH.write_text(json.dumps(estimates))
 
     print(f"\n✅ {n_total_estimated:,} paire(s) estimée(s) écrite(s) dans {ESTIMATES_PATH} "
-          f"({n_total_real:,} paire(s) déjà réelles, non touchées).".replace(",", " "))
+          f"({n_total_real:,} paire(s) déjà réelles, non touchées) — dont {n_via_city_pair:,} "
+          "via une vitesse calibrée par couple de villes, le reste via le modèle générique "
+          "par tranche.".replace(",", " "))
     print(
         "L'app utilisera automatiquement ces estimations quand aucune vraie valeur n'existe "
         "pour un hôtel donné (le mode Escorte s'applique dessus normalement). Relance ce "
