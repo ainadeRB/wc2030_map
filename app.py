@@ -372,7 +372,7 @@ def build_popup_html(row):
     if photo_html:
         lines.append(photo_html)
         if n_photos > 1:
-            lines.append(f'<span style="color:#666;font-size:0.85em;">+{n_photos - 1} autre(s) photo(s) dans data/photos/{row.get("ID")}/</span>')
+            lines.append(f'<span style="color:#666;font-size:0.85em;">📸 +{n_photos - 1} autre(s) photo(s) — galerie sous la carte ⬇️</span>')
 
     lines += [
         f"<b>{format_field_value('Nom', row.get('Nom')) or MISSING_LABEL}</b>",
@@ -388,6 +388,57 @@ def build_popup_html(row):
         f"Note Booking : {fmt('Note Booking')}",
     ]
     return f'<div style="width:{POPUP_TEXT_WIDTH_PX}px;overflow-wrap:break-word;white-space:normal;">' + "<br>".join(lines) + "</div>"
+
+
+# Tolérance (km) pour rattacher un clic sur un marqueur à l'hôtel dont il
+# provient : le marqueur est posé exactement sur les coordonnées de
+# l'hôtel, une petite marge suffit à absorber les imprécisions de rendu.
+HOTEL_CLICK_TOLERANCE_KM = 0.05
+
+
+def find_hotel_at(df: pd.DataFrame, lat: float, lon: float):
+    """Hôtel de `df` le plus proche de (lat, lon), ou None si aucun n'est à
+    moins de HOTEL_CLICK_TOLERANCE_KM (donc pas vraiment "le même point")."""
+    coords = df.dropna(subset=["Latitude", "Longitude"])
+    if coords.empty:
+        return None
+    dists = haversine_km(lat, lon, coords["Latitude"].values, coords["Longitude"].values)
+    idx = int(np.argmin(dists))
+    if dists[idx] > HOTEL_CLICK_TOLERANCE_KM:
+        return None
+    return coords.iloc[idx]
+
+
+def render_photo_gallery(hotel_row: pd.Series):
+    """Galerie complète des photos d'un hôtel, affichée sous la carte quand
+    on clique sur sa bulle — le popup Leaflet lui-même ne peut afficher
+    qu'une seule photo de façon fiable (voir historique), donc la galerie
+    complète vit ici, en HTML/CSS Streamlit natif plutôt que dans le popup."""
+    hotel_id = str(hotel_row.get("ID"))
+    try:
+        photos = get_hotel_photos(hotel_id)
+    except Exception:
+        photos = []
+    if not photos:
+        return
+
+    name = format_field_value("Nom", hotel_row.get("Nom")) or hotel_id
+    with st.container(border=True):
+        header_col, close_col = st.columns([6, 1])
+        header_col.markdown(f"#### 📸 Photos — {name}")
+        if close_col.button("✕ Fermer", key=f"close_gallery_{hotel_id}"):
+            st.session_state["photos_gallery_dismissed_for"] = hotel_id
+            st.rerun()
+        cols = st.columns(4)
+        shown = 0
+        for photo in photos:
+            try:
+                cols[shown % 4].image(str(photo), width="stretch")
+                shown += 1
+            except Exception:
+                continue
+        if shown == 0:
+            st.caption("Aucune des photos de cet hôtel n'a pu être chargée.")
 
 
 @st.cache_data(show_spinner=False)
@@ -851,7 +902,7 @@ def main():
 
     fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated_for_banner)
     map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
-                           returned_objects=["last_clicked"])
+                           returned_objects=["last_clicked", "last_object_clicked"])
     if map_state and map_state.get("last_clicked"):
         clicked = map_state["last_clicked"]
         new_point = (clicked["lat"], clicked["lng"])
@@ -863,6 +914,14 @@ def main():
             st.session_state["ref_source"] = REF_SOURCE_MANUAL
             st.session_state["distance_mode"] = "Distance (vol d'oiseau)"
             st.rerun()
+
+    obj_clicked = map_state.get("last_object_clicked") if map_state else None
+    if obj_clicked:
+        clicked_hotel = find_hotel_at(filtered_df, obj_clicked["lat"], obj_clicked["lng"])
+        if clicked_hotel is not None:
+            clicked_id = str(clicked_hotel.get("ID"))
+            if st.session_state.get("photos_gallery_dismissed_for") != clicked_id:
+                render_photo_gallery(clicked_hotel)
 
     st.markdown(f"**Légende couleur : {color_label}**")
     legend_items = [
@@ -908,7 +967,7 @@ def main():
             - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs".
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
             - **Distance / Temps de trajet** : active le filtre, puis choisis la source du point de référence — "Point choisi" (clic sur la carte ou coordonnées saisies, toujours en distance à vol d'oiseau) ou "Point d'intérêt" (permet en plus le temps de trajet réel en voiture). En mode point d'intérêt, choisis d'abord le type (stade, site d'entraînement...), puis la ville si l'onglet en propose une, puis le point précis. En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable. Un bandeau jaune en haut à droite de la carte signale quand des temps affichés sont des estimations interpolées (pas encore de vrai calcul, voir `scripts/estimate_travel_times.py`).
-            - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol ; le clic affiche toutes les photos (la première en grand, les suivantes en galerie de vignettes). Aucune modification du fichier Excel n'est nécessaire.
+            - **Photos** : dépose des images dans `data/photos/<ID de l'hôtel>/` (ex. `data/photos/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Quand un hôtel a plusieurs photos, cliquer sur sa bulle ouvre aussi la galerie complète juste sous la carte (bouton "✕ Fermer" pour la masquer). Aucune modification du fichier Excel n'est nécessaire.
             - **Données** : dépose tes fichiers Excel réels (hôtels + POI) dans la barre latérale — l'app détecte automatiquement les colonnes. En attendant, des données de démonstration sont utilisées.
             """
         )

@@ -35,7 +35,8 @@ Coupe du Monde 2030 au Maroc.
   l'infobulle ; le clic affiche toujours la fiche complète. Un champ sans
   valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
 - **Photos** : une vignette par hôtel au survol, une version plus grande au
-  clic (avec le nombre de photos supplémentaires s'il y en a) — voir
+  clic ; si l'hôtel a plusieurs photos, cliquer sur sa bulle ouvre aussi la
+  **galerie complète** juste sous la carte — voir
   [Photos des hôtels](#photos-des-hôtels) ci-dessous.
 - **Filtre par distance** : active le filtre puis choisis la source du point
   de référence — un **point choisi** (clic sur la carte ou coordonnées
@@ -131,7 +132,10 @@ Formats acceptés : `.jpg`, `.jpeg`, `.png`, `.webp`. Aucune modification du
 fichier Excel n'est nécessaire — l'app détecte automatiquement les photos au
 démarrage. La première photo (ordre alphabétique) sert de vignette au
 survol ; le clic affiche une version plus grande et indique le nombre de
-photos supplémentaires. Ce dossier n'est **jamais versionné dans git**.
+photos supplémentaires. Si l'hôtel a plusieurs photos, cliquer sur sa bulle
+ouvre en plus une galerie complète (toutes les photos, en grille) juste
+sous la carte — un bouton "✕ Fermer" la masque. Ce dossier n'est **jamais
+versionné dans git**.
 
 ## Temps de trajet et cache
 
