@@ -13,8 +13,13 @@ Coupe du Monde 2030 au Maroc.
     agrandir/rétrécir sans perdre la proportionnalité ; un hôtel sans
     valeur pour ce champ garde un point de taille fixe ;
   - **couleur** selon un critère au choix (classement étoiles ou brut,
-    catégorie, statut, ville hôte, signature, risque, visite), avec une
-    couleur personnalisable par valeur.
+    catégorie, statut, ville hôte, signature, risque, visite, ou **note
+    Booking par tranches**), avec une couleur personnalisable par valeur.
+    Pour la note Booking, 3 tranches par défaut (0-6 / 6-8 / 8-10),
+    chacune avec sa borne haute et sa couleur éditables (pas à 0,1 près,
+    incluse à gauche / exclue à droite sauf la dernière) ; un bouton
+    "➕ Ajouter une tranche" permet d'en créer autant que voulu (scinde
+    en deux la tranche la plus large).
   - **badge "note Booking"** au-dessus de chaque bulle à partir d'un
     certain niveau de zoom (fond bleu Booking.com, texte blanc, note à
     une décimale — ex. "9,8" ; fond gris clair et "-" pour un hôtel sans

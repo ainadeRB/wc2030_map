@@ -27,6 +27,7 @@ from src.styling import (
     DEFAULT_COLOR,
     POI_TYPE_COLORS,
     POI_TYPE_ICON,
+    QUALITATIVE_PALETTE,
     STAR_COLORS,
 )
 
@@ -52,6 +53,7 @@ COLOR_MODES = {
     "Signature": "Signature",
     "Risque": "Risque",
     "Visite": "Visite",
+    "Note Booking (tranches)": "booking_bands",
 }
 
 # Fonds de carte gratuits, sans clé API (CARTO exige désormais une clé,
@@ -284,6 +286,14 @@ def hydrate_style_prefs():
         st.session_state.setdefault(state_key, _decode_color_map(color_mode, saved_map))
     if "poi_colormap" in prefs:
         st.session_state.setdefault("poi_colormap", dict(prefs["poi_colormap"]))
+    if prefs.get("booking_band_edges"):
+        st.session_state.setdefault("booking_band_edges", list(prefs["booking_band_edges"]))
+    if prefs.get("booking_band_colors"):
+        st.session_state.setdefault("booking_band_colors", list(prefs["booking_band_colors"]))
+    if prefs.get("booking_band_ids"):
+        st.session_state.setdefault("booking_band_ids", list(prefs["booking_band_ids"]))
+    if "booking_band_next_id" in prefs:
+        st.session_state.setdefault("booking_band_next_id", prefs["booking_band_next_id"])
 
 
 def _default_if_unset(key, **defaults):
@@ -342,6 +352,107 @@ def get_poi_color_map(poi_types):
             if t not in st.session_state[state_key]:
                 st.session_state[state_key][t] = POI_TYPE_COLORS.get(t, DEFAULT_COLOR)
     return st.session_state[state_key]
+
+
+# Tranches par défaut pour la coloration "Note Booking (tranches)" : 3
+# tranches (faible/moyen/élevé), bornes 0 et 10 fixes, incluses à gauche et
+# exclues à droite sauf la dernière (10 inclus, sinon une note de 10,0
+# pile ne rentrerait dans aucune tranche).
+BOOKING_BAND_DEFAULT_EDGES = [0.0, 6.0, 8.0, 10.0]
+BOOKING_BAND_DEFAULT_COLORS = ["#c62828", "#f9a825", "#2e7d32"]
+
+
+def get_booking_bands():
+    """(edges, colors, ids) éditables par l'utilisateur pour la coloration
+    par tranche de note Booking, conservés en session (et sur disque, voir
+    hydrate_style_prefs) — même principe que get_color_map/get_poi_color_map
+    pour les autres critères.
+
+    `ids` donne à chaque tranche un identifiant STABLE, indépendant de sa
+    position dans la liste : les widgets (color_picker, number_input) de
+    l'éditeur sont callés par cet identifiant plutôt que par leur index de
+    boucle, sinon insérer une tranche au milieu décale les positions et
+    Streamlit, qui garde l'état de chaque widget par sa clé, réaffiche la
+    valeur de l'ANCIENNE tranche qui occupait cette position plutôt que la
+    nouvelle — un bug bien réel observé lors des tests (les couleurs se
+    décalaient silencieusement d'une tranche après un ajout)."""
+    st.session_state.setdefault("booking_band_edges", list(BOOKING_BAND_DEFAULT_EDGES))
+    st.session_state.setdefault("booking_band_colors", list(BOOKING_BAND_DEFAULT_COLORS))
+    st.session_state.setdefault("booking_band_ids", list(range(len(BOOKING_BAND_DEFAULT_COLORS))))
+    st.session_state.setdefault("booking_band_next_id", len(BOOKING_BAND_DEFAULT_COLORS))
+    ids = st.session_state["booking_band_ids"]
+    colors = st.session_state["booking_band_colors"]
+    # Robustesse : si edges/colors ont été chargés depuis un ui_prefs.json
+    # plus ancien (sans "ids"), ou désynchronisés d'une façon ou d'une
+    # autre, on complète plutôt que de planter.
+    while len(ids) < len(colors):
+        ids.append(st.session_state["booking_band_next_id"])
+        st.session_state["booking_band_next_id"] += 1
+    del ids[len(colors):]
+    return st.session_state["booking_band_edges"], colors, ids
+
+
+def _next_booking_band_id():
+    st.session_state.setdefault("booking_band_next_id", 0)
+    new_id = st.session_state["booking_band_next_id"]
+    st.session_state["booking_band_next_id"] += 1
+    return new_id
+
+
+def booking_band_index(value, edges):
+    """Indice (0-based) de la tranche à laquelle appartient `value`, ou None
+    si `value` est manquante. Bornes incluses à gauche, exclues à droite,
+    sauf la toute dernière tranche (incluse des deux côtés)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    n_bands = len(edges) - 1
+    for i in range(n_bands):
+        lo, hi = edges[i], edges[i + 1]
+        if lo <= value < hi or (i == n_bands - 1 and lo <= value <= hi):
+            return i
+    return 0 if value < edges[0] else n_bands - 1
+
+
+def render_booking_band_editor(edges, colors, ids):
+    """UI pour éditer les tranches de la coloration "Note Booking
+    (tranches)" : bornes 0 et 10 fixes (imposées par le format de la note),
+    une borne interne modifiable par tranche au 0,1 près, une couleur par
+    tranche, et un bouton pour en ajouter une nouvelle (scinde en deux la
+    tranche la plus large actuellement). Les widgets sont callés par
+    `ids[i]` (identifiant stable de la tranche), jamais par `i` lui-même
+    (voir la docstring de get_booking_bands pour pourquoi)."""
+    n_bands = len(edges) - 1
+    for i in range(n_bands):
+        lo, hi = edges[i], edges[i + 1]
+        is_last = i == n_bands - 1
+        band_id = ids[i]
+        cols = st.columns([3, 2, 2])
+        cols[0].caption(f"Tranche {i + 1} : [{lo:.1f} – {hi:.1f}{']' if is_last else '['}")
+        if is_last:
+            cols[1].caption("Max : 10,0 (fixe)")
+        else:
+            next_hi = edges[i + 2] if i + 2 < len(edges) else 10.0
+            new_hi = cols[1].number_input(
+                f"Max tranche {i + 1}", min_value=round(lo + 0.1, 1), max_value=round(next_hi - 0.1, 1),
+                value=hi, step=0.1, format="%.1f", key=f"booking_band_max_{band_id}", label_visibility="collapsed",
+            )
+            edges[i + 1] = round(new_hi, 1)
+        colors[i] = cols[2].color_picker(
+            f"Couleur tranche {i + 1}", colors[i], key=f"booking_band_color_{band_id}", label_visibility="collapsed",
+        )
+
+    can_add = any(round(edges[i + 1] - edges[i], 1) >= 0.2 for i in range(n_bands))
+    if st.button("➕ Ajouter une tranche", disabled=not can_add, key="add_booking_band"):
+        widths = [edges[i + 1] - edges[i] for i in range(n_bands)]
+        idx = widths.index(max(widths))
+        mid = round((edges[idx] + edges[idx + 1]) / 2, 1)
+        if edges[idx] < mid < edges[idx + 1]:
+            edges.insert(idx + 1, mid)
+            colors.insert(idx + 1, QUALITATIVE_PALETTE[len(colors) % len(QUALITATIVE_PALETTE)])
+            ids.insert(idx + 1, _next_booking_band_id())
+        st.rerun()
+    if not can_add:
+        st.caption("Résolution maximale atteinte (0,1) — impossible d'ajouter une tranche plus fine.")
 
 
 MISSING_LABEL = "Non renseigné"
@@ -682,21 +793,28 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
         color_label = st.selectbox("Couleur selon", list(COLOR_MODES.keys()), key="color_mode_label", **_default_if_unset("color_mode_label", index=0))
         color_mode = COLOR_MODES[color_label]
 
-        if color_mode == "stars":
-            values = sorted(v for v in hotels_df["Étoiles (estimées)"].dropna().unique().tolist())
-        elif color_mode in hotels_df.columns:
-            values = sorted(hotels_df[color_mode].dropna().unique().tolist())
-        else:
+        if color_mode == "booking_bands":
             values = []
-        color_map = get_color_map(color_mode, values)
-
-        with st.expander("🎨 Personnaliser les couleurs"):
-            if values:
-                for v in values:
-                    label = f"{int(v)} ★" if color_mode == "stars" else str(v)
-                    color_map[v] = st.color_picker(label, color_map.get(v, DEFAULT_COLOR), key=f"cp_{color_mode}_{v}")
+            edges, colors, ids = get_booking_bands()
+            color_map = {"edges": edges, "colors": colors}
+            with st.expander("🎨 Personnaliser les couleurs", expanded=False):
+                render_booking_band_editor(edges, colors, ids)
+        else:
+            if color_mode == "stars":
+                values = sorted(v for v in hotels_df["Étoiles (estimées)"].dropna().unique().tolist())
+            elif color_mode in hotels_df.columns:
+                values = sorted(hotels_df[color_mode].dropna().unique().tolist())
             else:
-                st.caption("Aucune valeur à colorer pour ce critère.")
+                values = []
+            color_map = get_color_map(color_mode, values)
+
+            with st.expander("🎨 Personnaliser les couleurs"):
+                if values:
+                    for v in values:
+                        label = f"{int(v)} ★" if color_mode == "stars" else str(v)
+                        color_map[v] = st.color_picker(label, color_map.get(v, DEFAULT_COLOR), key=f"cp_{color_mode}_{v}")
+                else:
+                    st.caption("Aucune valeur à colorer pour ce critère.")
 
         st.markdown("**Infos au survol**")
         tooltip_fields = st.multiselect(
@@ -711,6 +829,10 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
         **{k: st.session_state[k] for k in STYLE_PREF_KEYS if k in st.session_state},
         "colormaps": {k: v for k, v in st.session_state.items() if k.startswith("colormap_")},
         "poi_colormap": st.session_state.get("poi_colormap", {}),
+        "booking_band_edges": st.session_state.get("booking_band_edges", []),
+        "booking_band_colors": st.session_state.get("booking_band_colors", []),
+        "booking_band_ids": st.session_state.get("booking_band_ids", []),
+        "booking_band_next_id": st.session_state.get("booking_band_next_id", 0),
     })
 
     return show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
@@ -829,9 +951,13 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
             size_value = row.get(size_col)
             has_size = size_value is not None and not (isinstance(size_value, float) and pd.isna(size_value))
             radius = scale_radius(size_value, size_min, size_max) * size_scale if has_size else BASE_DOT_RADIUS
-            cat_value = row["Étoiles (estimées)"] if color_mode == "stars" else row.get(color_mode)
-            has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
-            color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
+            if color_mode == "booking_bands":
+                band_idx = booking_band_index(row.get("Note Booking"), color_map["edges"])
+                color = color_map["colors"][band_idx] if band_idx is not None else DEFAULT_COLOR
+            else:
+                cat_value = row["Étoiles (estimées)"] if color_mode == "stars" else row.get(color_mode)
+                has_value = cat_value is not None and not (isinstance(cat_value, float) and pd.isna(cat_value))
+                color = color_map.get(cat_value, DEFAULT_COLOR) if has_value else DEFAULT_COLOR
 
             popup_html = build_popup_html(row)
             folium.CircleMarker(
@@ -1007,10 +1133,17 @@ def main():
             st.rerun()
 
     st.markdown(f"**Légende couleur : {color_label}**")
-    legend_items = [
-        (f"{int(v)} ★" if color_mode == "stars" else str(v), c)
-        for v, c in sorted(color_map.items(), key=lambda kv: str(kv[0]))
-    ]
+    if color_mode == "booking_bands":
+        edges, colors = color_map["edges"], color_map["colors"]
+        legend_items = [
+            (f"[{edges[i]:.1f} – {edges[i + 1]:.1f}{']' if i == len(colors) - 1 else '['}", colors[i])
+            for i in range(len(colors))
+        ]
+    else:
+        legend_items = [
+            (f"{int(v)} ★" if color_mode == "stars" else str(v), c)
+            for v, c in sorted(color_map.items(), key=lambda kv: str(kv[0]))
+        ]
     legend_html = " &nbsp; ".join(
         f'<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:{c};margin-right:4px;"></span>{lbl}'
         for lbl, c in legend_items
