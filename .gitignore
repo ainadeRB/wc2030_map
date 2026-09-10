@@ -12,6 +12,14 @@ data/travel_time_cache.json
 data/travel_time_estimates.json
 data/photos/
 
+# Filet de sécurité : tout fichier Excel posé directement à la racine du
+# projet (ex. une copie de travail du fichier réel, quel que soit son nom)
+# ne doit jamais être versionné — seules les données de démo dans data/ le
+# sont. Le "/" en tête ancre la règle à la racine seulement (n'affecte pas
+# data/sample_*.xlsx).
+/*.xlsx
+/*.xls
+
 # Préférences d'affichage locales (taille/couleur des bulles) : propres à
 # chaque utilisateur, jamais versionnées.
 data/ui_prefs.json
