@@ -715,7 +715,20 @@ def sidebar_data_sources():
     return hotels_df, pois_df
 
 
-def sidebar_filters(df: pd.DataFrame):
+def sidebar_filters(df: pd.DataFrame, data_version=0):
+    # `data_version` (mtime du fichier hôtels réel, voir main()) fait partie
+    # de la clé de chaque widget de filtre : la valeur d'un widget Streamlit
+    # n'est prise en compte qu'à SA toute première création pour une clé
+    # donnée — sur les reruns suivants (y compris après un nouvel upload
+    # Excel avec des dates/valeurs différentes), Streamlit ignore le nouveau
+    # `value=` et garde l'ancien réglage. Sans ce préfixe, un curseur ou une
+    # plage de dates réglés sur les bornes d'un ANCIEN fichier restait figé
+    # et filtrait silencieusement des hôtels du NOUVEAU fichier qui tombent
+    # hors de cette plage périmée — observé en conditions réelles (import
+    # d'un nouveau hotels.xlsx, "Hôtels affichés" resté bloqué sous le vrai
+    # total). En changeant de préfixe à chaque nouveau fichier, chaque
+    # widget redémarre avec la vraie plage complète de CE fichier ; il garde
+    # sa valeur normalement tant que le fichier ne change pas.
     filtered = df.copy()
 
     with st.sidebar.container(border=True):
@@ -726,7 +739,7 @@ def sidebar_filters(df: pd.DataFrame):
                 options = sorted(filtered[col].dropna().unique().tolist())
                 if not options:
                     continue
-                chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
+                chosen = st.multiselect(label, options, default=[], key=f"filt_{data_version}_{col}")
                 if chosen:
                     filtered = filtered[filtered[col].isin(chosen)]
 
@@ -735,7 +748,7 @@ def sidebar_filters(df: pd.DataFrame):
                 options = sorted(filtered[col].dropna().unique().tolist())
                 if not options:
                     continue
-                chosen = st.multiselect(label, options, default=[], key=f"filt_{col}")
+                chosen = st.multiselect(label, options, default=[], key=f"filt_{data_version}_{col}")
                 if chosen:
                     filtered = filtered[filtered[col].isin(chosen)]
 
@@ -748,7 +761,7 @@ def sidebar_filters(df: pd.DataFrame):
                 if vmin == vmax:
                     continue
                 lo, hi = st.slider(label, min_value=float(np.floor(vmin)), max_value=float(np.ceil(vmax)),
-                                    value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{col}")
+                                    value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{data_version}_{col}")
                 filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
 
         with st.expander("📅 Dates"):
@@ -759,7 +772,7 @@ def sidebar_filters(df: pd.DataFrame):
                 dmin, dmax = series.min().date(), series.max().date()
                 if dmin == dmax:
                     continue
-                lo, hi = st.date_input(label, value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"filt_{col}")
+                lo, hi = st.date_input(label, value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"filt_{data_version}_{col}")
                 if isinstance(lo, tuple):
                     lo, hi = lo
                 filtered = filtered[(filtered[col].dt.date.between(lo, hi)) | filtered[col].isna()]
@@ -1087,7 +1100,8 @@ def main():
 
     hotels_df, pois_df = sidebar_data_sources()
     show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
-    filtered_df = sidebar_filters(hotels_df)
+    hotels_data_version = HOTELS_PERSIST_PATH.stat().st_mtime if HOTELS_PERSIST_PATH.exists() else 0
+    filtered_df = sidebar_filters(hotels_df, hotels_data_version)
     sidebar_distance_filter(pois_df)
 
     n_estimated_for_banner = 0
