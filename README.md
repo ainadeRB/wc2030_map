@@ -4,6 +4,15 @@ Outil Streamlit type Kepler.gl pour visualiser et filtrer les hôtels et
 points d'intérêt (stades, sites d'entraînement, aéroports...) du projet
 Coupe du Monde 2030 au Maroc.
 
+## Utilisation 100% locale (sans rien envoyer en ligne)
+
+Pour un usage où les données ne doivent jamais transiter par internet :
+sur cette page GitHub, bouton **"Code" → "Download ZIP"**, dézippe, puis
+double-clique sur `Lancer_l_app.bat` (Windows — voir `COMMENT_LANCER.txt`
+dans le ZIP). Tout tourne sur la machine de la personne qui l'utilise ;
+seule la toute première installation a besoin d'internet (pour récupérer
+les bibliothèques Python).
+
 ## Fonctionnalités
 
 - **Carte interactive**, fond de carte au choix (standard OpenStreetMap,

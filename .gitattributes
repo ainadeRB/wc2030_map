@@ -1,0 +1,7 @@
+# Fichiers présents dans le dépôt mais exclus du ZIP téléchargeable
+# ("Code" -> "Download ZIP" sur GitHub) : utiles pour développer ici,
+# sans intérêt pour quelqu'un qui télécharge juste l'app pour la lancer
+# en local (voir Lancer_l_app.bat).
+.devcontainer export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore

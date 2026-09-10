@@ -1,0 +1,25 @@
+COMMENT LANCER L'APPLICATION (Windows)
+========================================
+
+1. Double-clique sur "Lancer_l_app.bat".
+
+2. Au tout premier lancement, une fenêtre noire s'ouvre et installe
+   automatiquement ce qu'il faut (quelques minutes, connexion internet
+   nécessaire UNIQUEMENT pour cette étape). Les lancements suivants sont
+   quasi instantanés.
+
+3. Un onglet s'ouvre dans ton navigateur avec l'application. Tout tourne
+   sur TON ordinateur : rien de tes données n'est envoyé en ligne.
+
+4. Pour importer tes hôtels : dans l'application, utilise les boutons
+   "Fichier hôtels (Excel)" / "Fichier points d'intérêt (Excel)" dans la
+   colonne de gauche pour déposer tes propres fichiers.
+
+5. Pour arrêter l'application : ferme la fenêtre noire (celle du
+   terminal). Fermer juste l'onglet du navigateur ne suffit pas.
+
+Si "Lancer_l_app.bat" te dit que Python n'est pas installé : installe-le
+gratuitement depuis le Microsoft Store (cherche "Python 3.12"), puis
+relance le script.
+
+En cas de souci, contacte la personne qui t'a transmis ce dossier.
