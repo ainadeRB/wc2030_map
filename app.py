@@ -399,6 +399,24 @@ def get_booking_bands():
         ids.append(st.session_state["booking_band_next_id"])
         st.session_state["booking_band_next_id"] += 1
     del ids[len(colors):]
+
+    # Robustesse supplémentaire : si "ids" contient un doublon (ex. un
+    # ui_prefs.json persisté depuis une session antérieure incohérente) ou
+    # si "next_id" est resté inférieur à un id déjà utilisé, deux tranches
+    # se retrouvent avec la même clé de widget et Streamlit plante
+    # (StreamlitDuplicateElementKey) — observé en conditions réelles. On
+    # répare ici plutôt que de laisser planter : tout doublon reçoit un
+    # nouvel id, et le compteur est toujours remonté au-dessus du plus
+    # grand id en circulation avant d'en distribuer un nouveau.
+    if ids:
+        st.session_state["booking_band_next_id"] = max(st.session_state["booking_band_next_id"], max(ids) + 1)
+    seen = set()
+    for i, band_id in enumerate(ids):
+        if band_id in seen:
+            ids[i] = st.session_state["booking_band_next_id"]
+            st.session_state["booking_band_next_id"] += 1
+        seen.add(ids[i])
+
     return st.session_state["booking_band_edges"], colors, ids, st.session_state["booking_band_missing_color"]
 
 
