@@ -61,9 +61,28 @@ def _find_col(columns, *candidates):
     return None
 
 
+# Nom de l'onglet contenant les vraies données hôtels dans le fichier Excel
+# du projet — celui-ci a aussi d'autres onglets (graphiques, listes de
+# travail...) qui ne doivent jamais être lus par erreur comme s'il
+# s'agissait des données. Recherche insensible à la casse/espaces, avec
+# repli sur le premier onglet si absent (fichiers de démo, anciens
+# fichiers, ou onglet renommé) plutôt que de planter.
+HOTELS_SHEET_NAME = "bdd_maroc_clean"
+
+
+def _find_sheet(sheet_names, target_name):
+    target = target_name.strip().lower()
+    for name in sheet_names:
+        if str(name).strip().lower() == target:
+            return name
+    return None
+
+
 @st.cache_data(show_spinner=False)
 def load_hotels(file_or_path) -> pd.DataFrame:
-    df = pd.read_excel(file_or_path, dtype=str)
+    xls = pd.ExcelFile(file_or_path)
+    sheet = _find_sheet(xls.sheet_names, HOTELS_SHEET_NAME) or xls.sheet_names[0]
+    df = pd.read_excel(xls, sheet_name=sheet, dtype=str)
     df.columns = [str(c).strip() for c in df.columns]
 
     # colonnes manquantes -> créées vides, pour que le reste de l'app soit robuste
