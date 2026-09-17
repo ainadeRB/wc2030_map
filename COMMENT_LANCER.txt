@@ -1,25 +1,95 @@
-COMMENT LANCER L'APPLICATION (Windows)
-========================================
+CARTOGRAPHIE HÔTELS — COUPE DU MONDE 2030 MAROC
+Guide de démarrage (Windows)
+================================================
 
-1. Double-clique sur "Lancer_l_app.bat".
+QU'EST-CE QUE C'EST ?
+----------------------
+Une carte interactive des hôtels et points d'intérêt (stades, sites
+d'entraînement, aéroports...) du projet Coupe du Monde 2030 au Maroc :
+filtres sur toutes les colonnes, bulles colorées par catégorie/statut/
+note Booking, recherche par distance ou temps de trajet, photos par
+hôtel, export de la sélection en Excel/CSV.
+
+Cette version tourne entièrement sur TON ordinateur, à partir des
+fichiers Excel que tu lui donnes. Rien de tes données n'est envoyé sur
+internet (sauf, en option, pour calculer un vrai temps de trajet en
+voiture — sinon une estimation à vol d'oiseau est utilisée).
+
+
+PRÉREQUIS
+---------
+Python doit être installé (gratuit). Pour vérifier : ouvre "Invite de
+commandes" (touche Windows, tape "cmd", Entrée) et tape :
+
+    python --version
+
+Si tu obtiens un numéro de version (ex. "Python 3.12.4"), c'est bon,
+passe à la suite. Sinon : ouvre le Microsoft Store, cherche
+"Python 3.12", installe-le, puis reviens ici.
+
+
+DÉMARRAGE
+---------
+1. Double-clique sur "Lancer_l_app.bat" (dans ce même dossier).
 
 2. Au tout premier lancement, une fenêtre noire s'ouvre et installe
    automatiquement ce qu'il faut (quelques minutes, connexion internet
-   nécessaire UNIQUEMENT pour cette étape). Les lancements suivants sont
-   quasi instantanés.
+   nécessaire UNIQUEMENT pour cette étape). Les lancements suivants
+   sont quasi instantanés.
 
-3. Un onglet s'ouvre dans ton navigateur avec l'application. Tout tourne
-   sur TON ordinateur : rien de tes données n'est envoyé en ligne.
+3. Un onglet s'ouvre dans ton navigateur avec l'application, déjà
+   chargée avec des données de démonstration.
 
-4. Pour importer tes hôtels : dans l'application, utilise les boutons
-   "Fichier hôtels (Excel)" / "Fichier points d'intérêt (Excel)" dans la
-   colonne de gauche pour déposer tes propres fichiers.
+4. Pour arrêter l'application : ferme la fenêtre noire (celle du
+   terminal). Fermer juste l'onglet du navigateur ne suffit pas — la
+   fenêtre noire doit rester ouverte tant que tu utilises l'app.
 
-5. Pour arrêter l'application : ferme la fenêtre noire (celle du
-   terminal). Fermer juste l'onglet du navigateur ne suffit pas.
 
-Si "Lancer_l_app.bat" te dit que Python n'est pas installé : installe-le
-gratuitement depuis le Microsoft Store (cherche "Python 3.12"), puis
-relance le script.
+IMPORTER TES PROPRES DONNÉES
+------------------------------
+Dans la colonne de gauche ("Données"), boutons "Fichier hôtels
+(Excel)" / "Fichier points d'intérêt (Excel)" : dépose tes fichiers
+réels. Ils remplacent les données de démo et restent chargés tant que
+tu ne fermes pas l'application (pas besoin de les réimporter à chaque
+clic, seulement si tu relances l'app depuis zéro).
 
-En cas de souci, contacte la personne qui t'a transmis ce dossier.
+Le fichier hôtels peut avoir plusieurs onglets (graphiques, listes de
+travail...) — seul l'onglet nommé "bdd_maroc_clean" est lu ; s'il
+n'existe pas, le premier onglet du classeur est utilisé.
+
+
+UN RAPIDE TOUR DE L'APPLICATION
+---------------------------------
+- Colonne de gauche : import des fichiers, choix du fond de carte,
+  activation des couches (hôtels, points d'intérêt par type), taille
+  et couleur des bulles, filtres (ville, catégorie, capacité, dates...).
+- Carte : clique sur une bulle pour voir le détail de l'hôtel (et sa
+  galerie photo si des photos existent pour cet hôtel — voir ci-dessous) ;
+  clique n'importe où sur la carte pour poser un point de référence et
+  filtrer par distance/temps de trajet depuis ce point.
+- Sous la carte : tableau des hôtels actuellement filtrés/affichés,
+  avec boutons pour exporter la sélection en Excel ou CSV.
+
+
+AJOUTER DES PHOTOS D'HÔTELS
+------------------------------
+Dépose des images dans un dossier par hôtel, nommé d'après son ID :
+
+    data\photos\
+      HTL-0001\
+        facade.jpg
+        chambre.jpg
+
+Formats acceptés : .jpg, .jpeg, .png, .webp. L'app les détecte
+automatiquement au démarrage suivant — aucune modification du fichier
+Excel n'est nécessaire.
+
+
+EN CAS DE SOUCI
+-----------------
+- "Lancer_l_app.bat" dit que Python n'est pas installé : voir la
+  section PRÉREQUIS ci-dessus.
+- L'installation échoue à la première étape : vérifie ta connexion
+  internet (nécessaire uniquement pour cette toute première fois),
+  relance "Lancer_l_app.bat".
+- Autre souci : contacte la personne qui t'a transmis ce dossier.
