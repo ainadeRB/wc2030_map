@@ -22,7 +22,7 @@ if errorlevel 1 (
 
 if not exist ".venv\Scripts\activate.bat" (
     echo.
-    echo Premiere installation, ca peut prendre quelques minutes...
+    echo Creation de l'environnement Python...
     echo.
     python -m venv .venv
     if errorlevel 1 (
@@ -31,18 +31,34 @@ if not exist ".venv\Scripts\activate.bat" (
         pause
         exit /b 1
     )
-    call .venv\Scripts\activate.bat
+)
+
+call .venv\Scripts\activate.bat
+
+if not exist ".venv\Scripts\streamlit.exe" (
+    echo.
+    echo Installation des dependances, ca peut prendre quelques minutes
+    echo ^(connexion internet necessaire pour cette etape uniquement^)...
+    echo.
     python -m pip install --upgrade pip
     pip install -r requirements.txt
-    if errorlevel 1 (
-        echo.
-        echo Erreur pendant l'installation des dependances. Verifie ta connexion internet
-        echo ^(necessaire uniquement pour cette premiere installation^) et relance ce script.
-        pause
-        exit /b 1
-    )
-) else (
-    call .venv\Scripts\activate.bat
+)
+
+if not exist ".venv\Scripts\streamlit.exe" (
+    echo.
+    echo ============================================================
+    echo  L'installation des dependances a echoue.
+    echo.
+    echo  Cause frequente : le reseau de cet ordinateur ^(proxy/pare-feu
+    echo  d'entreprise^) bloque l'acces a internet necessaire pour cette
+    echo  installation. Essaie depuis un autre reseau ^(ex. partage de
+    echo  connexion mobile^), ou contacte ton service informatique.
+    echo.
+    echo  Relancer ce script reessaiera automatiquement l'installation.
+    echo ============================================================
+    echo.
+    pause
+    exit /b 1
 )
 
 echo.
