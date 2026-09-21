@@ -1,4 +1,5 @@
-"""Envoie les photos locales (data/photos/<id_hotel>/*.jpg) vers Cloudinary
+"""Envoie les photos locales (data/photos/<ville_hote>/<id_hotel>/*.jpg, ou
+à plat data/photos/<id_hotel>/*.jpg) vers Cloudinary
 et écrit data/photos_manifest.json (hotel_id -> liste d'URLs) : c'est ce
 fichier, lui bien versionné dans git, qui permet à la version hébergée
 (Streamlit Community Cloud, sans disque persistant) d'afficher les mêmes
@@ -51,7 +52,7 @@ except ImportError:
 
 import os  # noqa: E402
 
-from src.photos import IMAGE_EXTENSIONS, PHOTOS_DIR, PHOTOS_MANIFEST_PATH  # noqa: E402
+from src.photos import IMAGE_EXTENSIONS, PHOTOS_DIR, PHOTOS_MANIFEST_PATH, iter_photo_folders  # noqa: E402
 
 UPLOAD_CACHE_PATH = Path("data") / ".photos_upload_cache.json"
 
@@ -104,10 +105,7 @@ def main():
     upload_cache = {} if args.force else _load_json(UPLOAD_CACHE_PATH)
 
     n_uploaded, n_skipped = 0, 0
-    for hotel_dir in sorted(PHOTOS_DIR.iterdir()):
-        if not hotel_dir.is_dir():
-            continue
-        hotel_id = hotel_dir.name
+    for hotel_id, hotel_dir in iter_photo_folders():
         files = sorted(f for f in hotel_dir.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS)
         if not files:
             continue

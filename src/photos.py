@@ -1,7 +1,10 @@
-"""Photos des hôtels : convention de stockage local (data/photos/<id>/,
-prioritaire — jamais affectée par ce qui suit) + génération de vignettes
-encodées en data URI pour être affichées dans les infobulles et popups
-Leaflet sans dépendre d'un serveur d'images séparé.
+"""Photos des hôtels : convention de stockage local (prioritaire — jamais
+affectée par ce qui suit), soit par ville hôte puis ID
+(data/photos/<ville>/<id>/), soit à plat (data/photos/<id>/, ancienne
+convention toujours acceptée) — les deux formats peuvent coexister, dossier
+par dossier. Génère aussi des vignettes encodées en data URI pour être
+affichées dans les infobulles et popups Leaflet sans dépendre d'un serveur
+d'images séparé.
 
 Repli sur des URLs distantes (Cloudinary) pour la version hébergée, qui n'a
 pas de disque persistant pour stocker de vraies photos : voir
@@ -21,11 +24,49 @@ PHOTOS_MANIFEST_PATH = Path("data") / "photos_manifest.json"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
+def _find_photo_folder(hotel_id: str):
+    """Localise le dossier de photos de `hotel_id` : à plat
+    (data/photos/<id>/, ancienne convention) en priorité, sinon sous
+    n'importe quel dossier de ville hôte (data/photos/<ville>/<id>/)."""
+    if not PHOTOS_DIR.is_dir():
+        return None
+    hotel_id = str(hotel_id)
+    flat = PHOTOS_DIR / hotel_id
+    if flat.is_dir():
+        return flat
+    for city_dir in PHOTOS_DIR.iterdir():
+        if not city_dir.is_dir():
+            continue
+        candidate = city_dir / hotel_id
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def iter_photo_folders():
+    """Génère (hotel_id, dossier) pour chaque hôtel ayant des photos
+    locales, qu'elles soient rangées à plat (data/photos/<id>/) ou par ville
+    hôte (data/photos/<ville>/<id>/) — utilisé pour parcourir toutes les
+    photos sans connaître les IDs à l'avance (ex. envoi vers Cloudinary)."""
+    if not PHOTOS_DIR.is_dir():
+        return
+    for entry in sorted(PHOTOS_DIR.iterdir()):
+        if not entry.is_dir():
+            continue
+        has_direct_images = any(f.suffix.lower() in IMAGE_EXTENSIONS for f in entry.iterdir())
+        if has_direct_images:
+            yield entry.name, entry
+            continue
+        for sub in sorted(entry.iterdir()):
+            if sub.is_dir():
+                yield sub.name, sub
+
+
 def _photos_dir_signature(hotel_id: str):
     """Signature bon marché (nb de fichiers + dernière modif) pour invalider
     le cache Streamlit quand des photos sont ajoutées/retirées à chaud."""
-    folder = PHOTOS_DIR / str(hotel_id)
-    if not folder.is_dir():
+    folder = _find_photo_folder(hotel_id)
+    if not folder:
         return None
     files = sorted(f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS)
     return tuple((f.name, f.stat().st_mtime) for f in files)
@@ -43,14 +84,16 @@ def _load_photos_manifest(mtime: float) -> dict:
 
 
 def get_hotel_photos(hotel_id) -> list:
-    """Photos de l'hôtel `hotel_id`. En priorité les fichiers locaux de
-    data/photos/<hotel_id>/ (list[Path], comme avant — jamais affecté par ce
-    qui suit) ; à défaut, les URLs du manifeste distant si présentes
-    (list[str]) — c'est ce second cas qui alimente la version hébergée, sans
-    disque local pour de vraies photos. Liste vide si ni l'un ni l'autre."""
-    sig = _photos_dir_signature(hotel_id)
-    if sig:
-        return [PHOTOS_DIR / str(hotel_id) / name for name, _ in sig]
+    """Photos de l'hôtel `hotel_id`. En priorité les fichiers locaux (list
+    [Path], à plat ou par ville hôte — voir _find_photo_folder, jamais
+    affecté par ce qui suit) ; à défaut, les URLs du manifeste distant si
+    présentes (list[str]) — c'est ce second cas qui alimente la version
+    hébergée, sans disque local pour de vraies photos. Liste vide si ni
+    l'un ni l'autre."""
+    folder = _find_photo_folder(hotel_id)
+    if folder:
+        sig = _photos_dir_signature(hotel_id)
+        return [folder / name for name, _ in sig]
     if not PHOTOS_MANIFEST_PATH.exists():
         return []
     manifest = _load_photos_manifest(PHOTOS_MANIFEST_PATH.stat().st_mtime)

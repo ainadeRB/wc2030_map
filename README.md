@@ -140,16 +140,24 @@ Les noms de colonnes proches (`Lat`/`Latitude`, `Lon`/`Lng`/`Longitude`,
 
 ## Photos des hôtels
 
-Dépose des images dans un dossier par hôtel, nommé d'après son `ID` :
+Dépose des images dans un dossier par ville hôte, puis par `ID` d'hôtel :
 
 ```
 data/photos/
-  HTL-0001/
-    facade.jpg
-    chambre.jpg
-  HTL-0002/
-    photo1.png
+  Casablanca/
+    HTL-0001/
+      facade.jpg
+      chambre.jpg
+  Rabat/
+    HTL-0002/
+      photo1.png
 ```
+
+Le nom du dossier de ville n'a pas besoin de correspondre exactement à la
+colonne "Ville hôte" du fichier Excel — seul le sous-dossier `ID` compte
+pour retrouver les photos. L'ancien rangement à plat (`data/photos/HTL-0001/`
+directement, sans dossier de ville) fonctionne toujours aussi, y compris
+mélangé avec le nouveau rangement.
 
 Formats acceptés : `.jpg`, `.jpeg`, `.png`, `.webp`. Aucune modification du
 fichier Excel n'est nécessaire — l'app détecte automatiquement les photos au
