@@ -21,6 +21,9 @@ if not defined PYEXE (
         "%USERPROFILE%\miniconda3\python.exe"
         "%LOCALAPPDATA%\miniconda3\python.exe"
         "C:\ProgramData\Miniconda3\python.exe"
+        "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+        "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+        "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
     ) do (
         if not defined PYEXE (
             if exist "%%~P" (
@@ -33,29 +36,67 @@ if not defined PYEXE (
 if not defined PYEXE (
     echo.
     echo ============================================================
-    echo  Python n'est pas installe ^(ou n'est pas configure
-    echo  correctement^) sur cet ordinateur.
-    echo.
-    echo  S'il n'est pas du tout installe ^(gratuit^) :
-    echo  1. Ouvre le Microsoft Store
-    echo  2. Cherche Python 3.12 et installe-le
-    echo  3. Ferme cette fenetre et relance ce script
-    echo.
-    echo  Si Python semble deja installe mais que ce message persiste :
-    echo  - Windows a parfois un raccourci "python" qui pointe vers le
-    echo    Store au lieu du vrai Python installe. Va dans Parametres
-    echo    Windows ^> Applications ^> Parametres avances des applications
-    echo    ^> Alias d'execution des applications, et desactive "python.exe"
-    echo    ^(et "python3.exe" si present^), puis relance ce script.
-    echo  - Si Python a ete installe via Anaconda/Miniconda, ce script a
-    echo    cherche automatiquement dans les emplacements habituels sans
-    echo    le trouver. Ouvre "Anaconda Prompt" depuis le menu Demarrer,
-    echo    tape "where python" et note le chemin affiche, puis contacte
-    echo    la personne qui t'a envoye cet outil pour l'ajouter au script.
+    echo  Python n'est pas installe sur cet ordinateur.
+    echo  Telechargement et installation automatique de Python...
+    echo  ^(connexion internet necessaire, ca peut prendre quelques
+    echo  minutes. Aucun droit administrateur n'est requis.^)
     echo ============================================================
     echo.
-    pause
-    exit /b 1
+    set "PYINSTALLER=%TEMP%\python_installer_wc2030.exe"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe' -OutFile '!PYINSTALLER!' -UseBasicParsing } catch { exit 1 }"
+    if errorlevel 1 (
+        echo.
+        echo ============================================================
+        echo  Le telechargement de Python a echoue.
+        echo.
+        echo  Cause frequente : le reseau de cet ordinateur ^(proxy/pare-feu
+        echo  d'entreprise^) bloque le telechargement automatique. Essaie
+        echo  depuis un autre reseau ^(ex. partage de connexion mobile^),
+        echo  ou installe Python manuellement depuis
+        echo  https://www.python.org/downloads/ ^(coche bien "Add python.exe
+        echo  to PATH" pendant l'installation^) puis relance ce script.
+        echo ============================================================
+        echo.
+        pause
+        exit /b 1
+    )
+
+    echo Installation de Python en cours, merci de patienter...
+    start /wait "" "!PYINSTALLER!" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=0 Include_test=0
+
+    del "!PYINSTALLER!" >nul 2>nul
+
+    for %%P in (
+        "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+        "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+        "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+    ) do (
+        if not defined PYEXE (
+            if exist "%%~P" (
+                set "PYEXE=%%~P"
+            )
+        )
+    )
+
+    if not defined PYEXE (
+        echo.
+        echo ============================================================
+        echo  L'installation automatique de Python a echoue ^(souvent a
+        echo  cause d'une politique de securite de l'entreprise qui bloque
+        echo  l'execution de nouveaux programmes^).
+        echo.
+        echo  Installe Python manuellement depuis
+        echo  https://www.python.org/downloads/ ^(coche bien "Add python.exe
+        echo  to PATH" pendant l'installation^), puis relance ce script.
+        echo ============================================================
+        echo.
+        pause
+        exit /b 1
+    )
+
+    echo.
+    echo Python installe avec succes.
+    echo.
 )
 
 if not exist ".venv\Scripts\activate.bat" (
@@ -79,7 +120,7 @@ if not exist ".venv\Scripts\streamlit.exe" (
     echo ^(connexion internet necessaire pour cette etape uniquement^)...
     echo.
     python -m pip install --upgrade pip
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
 )
 
 if not exist ".venv\Scripts\streamlit.exe" (
