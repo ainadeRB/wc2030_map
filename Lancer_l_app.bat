@@ -144,6 +144,6 @@ echo.
 echo Lancement de l'application... Une fenetre de navigateur va s'ouvrir.
 echo Pour arreter l'application, ferme simplement cette fenetre noire.
 echo.
-streamlit run app.py --server.headless false
+python -m streamlit run app.py --server.headless false
 
 pause
