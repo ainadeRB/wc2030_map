@@ -5,3 +5,10 @@
 .devcontainer export-ignore
 .gitattributes export-ignore
 .gitignore export-ignore
+
+# Contient des URLs vers de vraies photos d'hôtels (utile UNIQUEMENT pour la
+# version hébergée en ligne, qui n'a pas de disque local persistant — voir
+# src/photos.py). Exclu du ZIP téléchargeable pour que la version offline
+# n'aille jamais chercher de photos sur internet : seul data/photos/ (local,
+# jamais versionné) doit fournir des photos dans cette version.
+data/photos_manifest.json export-ignore
