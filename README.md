@@ -47,11 +47,9 @@ les bibliothèques Python).
   chaque type de point d'intérêt personnalisable (icône automatiquement
   noire ou blanche selon la couleur choisie, pour rester lisible) —
   également sauvegardée automatiquement.
-- **Filtres sur (quasiment) toutes les colonnes** du fichier hôtels : ville
-  hôte, ville, catégorie, classement, statut, propriétaire, opérateur,
-  signatures, risque, visite, capacité, prix moyen (PMC), chambres
-  allouées, note Booking, dates (ouverture / dernière et prochaine
-  rénovation), recherche par nom.
+- **Filtres** : ville hôte, classement, statut, signature (simplifiée en
+  Oui/Non — "Oui" si la colonne vaut "yes", quelle que soit la casse),
+  risque, capacité, note Booking, recherche par nom.
 - **Infos au survol configurables** : choisis les champs affichés dans
   l'infobulle ; le clic affiche toujours la fiche complète. Un champ sans
   valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.

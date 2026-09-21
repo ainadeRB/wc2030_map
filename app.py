@@ -194,32 +194,30 @@ BASE_DOT_RADIUS = 3
 # l'utilisateur.
 POI_MARKER_SIZE_PX = 26
 
+# Filtres affichés dans le panneau principal ("🏨 Hôtels" dans
+# sidebar_filters) : volontairement réduits à l'essentiel plutôt que
+# d'exposer toutes les colonnes, pour un seul panneau simple à parcourir.
 CATEGORICAL_FILTERS = [
     ("Ville hôte", "Ville hôte"),
-    ("Ville", "Ville"),
-    ("Catégorie", "Catégorie"),
-    ("Nouveau classement assimilé", "Nouveau classement assimilé"),
-    ("Nouveau Statut vérifié", "Nouveau Statut vérifié"),
-    ("Propriétaire", "Propriétaire"),
-    ("Opérateur", "Opérateur"),
-    ("Signature Prop", "Signature Prop"),
-    ("Signature Op", "Signature Op"),
-    ("Signature global", "Signature"),
+    ("Classement", "Nouveau classement assimilé"),
+    ("Statut", "Nouveau Statut vérifié"),
+    ("Signature", "Signature (Oui/Non)"),
     ("Risque", "Risque"),
-    ("Visite", "Visite"),
 ]
 
+NUMERIC_FILTERS_IN_SIDEBAR = [
+    ("Capacité", "Capacité act (cha.)"),
+    ("Note Booking", "Note Booking"),
+]
+
+# Liste complète des champs numériques utilisables pour la TAILLE des
+# bulles (sidebar_map_settings) — plus large que NUMERIC_FILTERS_IN_SIDEBAR
+# ci-dessus (qui ne sert qu'aux filtres), donc gardée séparée.
 NUMERIC_FILTERS = [
     ("Capacité (chambres)", "Capacité act (cha.)"),
     ("Prix moyen chambre (PMC vérif)", "PMC vérif"),
     ("Chambres allouées (total)", "#Chambres alloues total"),
     ("Note Booking", "Note Booking"),
-]
-
-DATE_FILTERS = [
-    ("Date d'ouverture", "Date ouverture"),
-    ("Date dernière rénovation", "Date dernière réno"),
-    ("Date prochaine rénovation", "Date prochaine réno"),
 ]
 
 # Un point de référence est soit posé librement (clic sur la carte ou
@@ -752,8 +750,8 @@ def sidebar_filters(df: pd.DataFrame, data_version=0):
     with st.sidebar.container(border=True):
         st.markdown("### 🔍 Filtres")
 
-        with st.expander("🏙️ Localisation & classification", expanded=True):
-            for label, col in CATEGORICAL_FILTERS[:5]:
+        with st.expander("🏨 Hôtels", expanded=True):
+            for label, col in CATEGORICAL_FILTERS:
                 options = sorted(filtered[col].dropna().unique().tolist())
                 if not options:
                     continue
@@ -761,17 +759,7 @@ def sidebar_filters(df: pd.DataFrame, data_version=0):
                 if chosen:
                     filtered = filtered[filtered[col].isin(chosen)]
 
-        with st.expander("✍️ Parties prenantes & statut"):
-            for label, col in CATEGORICAL_FILTERS[5:]:
-                options = sorted(filtered[col].dropna().unique().tolist())
-                if not options:
-                    continue
-                chosen = st.multiselect(label, options, default=[], key=f"filt_{data_version}_{col}")
-                if chosen:
-                    filtered = filtered[filtered[col].isin(chosen)]
-
-        with st.expander("🔢 Capacité, prix & notes"):
-            for label, col in NUMERIC_FILTERS:
+            for label, col in NUMERIC_FILTERS_IN_SIDEBAR:
                 series = filtered[col].dropna()
                 if series.empty:
                     continue
@@ -781,19 +769,6 @@ def sidebar_filters(df: pd.DataFrame, data_version=0):
                 lo, hi = st.slider(label, min_value=float(np.floor(vmin)), max_value=float(np.ceil(vmax)),
                                     value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{data_version}_{col}")
                 filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
-
-        with st.expander("📅 Dates"):
-            for label, col in DATE_FILTERS:
-                series = filtered[col].dropna()
-                if series.empty:
-                    continue
-                dmin, dmax = series.min().date(), series.max().date()
-                if dmin == dmax:
-                    continue
-                lo, hi = st.date_input(label, value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"filt_{data_version}_{col}")
-                if isinstance(lo, tuple):
-                    lo, hi = lo
-                filtered = filtered[(filtered[col].dt.date.between(lo, hi)) | filtered[col].isna()]
 
         with st.expander("🔎 Recherche"):
             search = st.text_input("Nom de l'hôtel contient...", "")

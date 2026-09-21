@@ -121,6 +121,14 @@ def load_hotels(file_or_path) -> pd.DataFrame:
                 "Signature Op", "Signature", "Risque", "Visite", "ID"]:
         df[col] = df[col].astype(str).str.strip().replace({"nan": np.nan, "None": np.nan, "": np.nan})
 
+    # Filtre simplifié "Signature" (Oui/Non) : la colonne réelle contient du
+    # texte libre ("Yes", vide, autre chose...), pas très lisible en
+    # multiselect. On dérive "Oui" (valeur "yes", insensible à la casse) /
+    # "Non" (tout le reste, y compris manquant) dans une colonne à part —
+    # la colonne "Signature" d'origine reste intacte pour son propre usage
+    # ailleurs (couleur des bulles, popup...).
+    df["Signature (Oui/Non)"] = np.where(df["Signature"].str.lower() == "yes", "Oui", "Non")
+
     # Doublons d'ID : on garde la ligne géolocalisée en priorité (un ID avec
     # une ligne vide + une ligne renseignée ne doit pas perdre la localisation).
     # Ne s'applique qu'aux lignes qui ONT un ID : pandas traite plusieurs ID
