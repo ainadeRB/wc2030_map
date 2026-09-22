@@ -164,6 +164,16 @@ def _load_poi_sheet(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     if not lat_col or not lon_col:
         return pd.DataFrame(columns=["Nom", "Type", "Ville", "Latitude", "Longitude"])
 
+    # Colonne "Activation" (Oui/Non) optionnelle : quand présente, seules les
+    # lignes "Oui" sont affichées, plutôt que d'avoir à supprimer/remettre
+    # des lignes dans le fichier source à chaque changement de sélection.
+    # Absente -> toutes les lignes sont gardées (anciens fichiers, ou onglet
+    # qui n'utilise pas cette convention).
+    activation_col = _find_col(df.columns, "Activation")
+    if activation_col:
+        is_active = df[activation_col].astype(str).str.strip().str.lower() == "oui"
+        df = df[is_active]
+
     city_col = _find_col(df.columns, "Ville", "Ville hôte", "City")
     inner_type_col = _find_col(df.columns, "Type", "Catégorie", "Category")
     id_col = _find_col(df.columns, "ID", "Id")
@@ -181,7 +191,7 @@ def _load_poi_sheet(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     if inner_type_col:
         out["Sous-type"] = df[inner_type_col]
 
-    extra_cols = [c for c in df.columns if c not in {name_col, lat_col, lon_col, city_col, inner_type_col}]
+    extra_cols = [c for c in df.columns if c not in {name_col, lat_col, lon_col, city_col, inner_type_col, activation_col}]
     for c in extra_cols:
         out[c] = df[c]
 

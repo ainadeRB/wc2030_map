@@ -239,7 +239,7 @@ REF_SOURCE_POI = "Point d'intérêt"
 # bulles (voir load_ui_prefs/save_ui_prefs) : simples (une valeur), les
 # "colormap_*" (une par critère de couleur déjà utilisé, dynamiques) sont
 # gérées à part car leur nombre dépend de ce que l'utilisateur a exploré.
-STYLE_PREF_KEYS = ["size_mode", "size_scale", "color_mode_label"]
+STYLE_PREF_KEYS = ["size_mode", "size_scale", "size_uniform", "uniform_radius", "color_mode_label"]
 
 
 def load_ui_prefs() -> dict:
@@ -802,6 +802,13 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
 
         st.markdown("**Couches**")
         show_hotels = st.checkbox("Hôtels", value=True)
+
+        poi_cities = sorted(pois_df["Ville"].dropna().unique().tolist()) if not pois_df.empty else []
+        if poi_cities:
+            poi_city_filter = st.multiselect("Ville (points d'intérêt)", poi_cities, default=[])
+            if poi_city_filter:
+                pois_df = pois_df[pois_df["Ville"].isin(poi_city_filter)]
+
         active_poi_layers = []
         poi_types = sorted(pois_df["Type"].dropna().unique().tolist()) if not pois_df.empty else []
         if poi_types:
@@ -827,11 +834,24 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
                     poi_color_map[t] = st.color_picker(t, poi_color_map.get(t, DEFAULT_COLOR), key=f"poi_cp_{t}")
 
         st.markdown("**Taille des bulles**")
-        size_options = dict(NUMERIC_FILTERS)
-        size_label = st.selectbox("Taille selon", list(size_options.keys()), key="size_mode", **_default_if_unset("size_mode", index=0))
-        size_col = size_options[size_label]
-        size_scale = st.slider("Échelle des bulles", min_value=0.4, max_value=3.0, step=0.1, key="size_scale", **_default_if_unset("size_scale", value=1.0))
-        st.caption("Un hôtel sans valeur pour ce champ garde un petit point de taille fixe, quelle que soit l'échelle.")
+        size_uniform = st.checkbox(
+            "Bulles toutes de la même taille", key="size_uniform", **_default_if_unset("size_uniform", value=False)
+        )
+        if size_uniform:
+            size_label, size_col = None, None
+            size_scale = 1.0
+            uniform_radius = st.slider(
+                "Taille des bulles", min_value=3, max_value=30, step=1,
+                key="uniform_radius", **_default_if_unset("uniform_radius", value=int(BASE_DOT_RADIUS) * 3),
+            )
+            st.caption("Toutes les bulles ont la même taille, réglable ci-dessus, quelle que soit la valeur des hôtels.")
+        else:
+            size_options = dict(NUMERIC_FILTERS)
+            size_label = st.selectbox("Taille selon", list(size_options.keys()), key="size_mode", **_default_if_unset("size_mode", index=0))
+            size_col = size_options[size_label]
+            size_scale = st.slider("Échelle des bulles", min_value=0.4, max_value=3.0, step=0.1, key="size_scale", **_default_if_unset("size_scale", value=1.0))
+            uniform_radius = BASE_DOT_RADIUS
+            st.caption("Un hôtel sans valeur pour ce champ garde un petit point de taille fixe, quelle que soit l'échelle.")
 
         st.markdown("**Style des bulles**")
         color_label = st.selectbox("Couleur selon", list(COLOR_MODES.keys()), key="color_mode_label", **_default_if_unset("color_mode_label", index=0))
@@ -882,7 +902,8 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
         ),
     })
 
-    return show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale
+    return (show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice,
+            tooltip_fields, size_col, size_label, size_scale, size_uniform, uniform_radius, pois_df)
 
 
 def sidebar_distance_filter(pois_df: pd.DataFrame):
@@ -972,7 +993,8 @@ def sidebar_distance_filter(pois_df: pd.DataFrame):
             st.session_state["distance_filter_on"] = False
 
 
-def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated=0):
+def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice,
+              tooltip_fields, size_col, size_scale, size_uniform=False, uniform_radius=BASE_DOT_RADIUS, n_estimated=0):
     # Pas de cache ici : st.cache_resource renvoyait le MÊME objet
     # folium.Map (mêmes noms de variables JS internes) à plusieurs reprises
     # au composant st_folium, qui n'est pas conçu pour recevoir deux fois le
@@ -986,7 +1008,12 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
 
     basemap = BASEMAPS.get(basemap_choice, next(iter(BASEMAPS.values())))
     m = folium.Map(location=center, zoom_start=zoom, tiles=None, prefer_canvas=True,
-                    max_zoom=basemap.get("max_zoom", 19))
+                    max_zoom=basemap.get("max_zoom", 19),
+                    # Zoom par crans de 0.25 niveau (au lieu d'1 niveau entier par
+                    # défaut) : un coup de molette déplace beaucoup moins d'un
+                    # coup, pour repérer plus finement les hôtels proches les uns
+                    # des autres sans sauter par-dessus.
+                    zoomSnap=0.25, zoomDelta=0.25)
     tile_kwargs = {"tiles": basemap["tiles"], "name": basemap_choice, "max_zoom": basemap.get("max_zoom", 19)}
     if basemap["attr"]:
         tile_kwargs["attr"] = basemap["attr"]
@@ -995,15 +1022,19 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
     folium.TileLayer(**tile_kwargs).add_to(m)
 
     if show_hotels and not hotels_df.empty:
-        size_series = hotels_df[size_col].dropna() if size_col in hotels_df.columns else pd.Series(dtype=float)
-        size_min, size_max = (size_series.min(), size_series.max()) if not size_series.empty else (0, 1)
+        if not size_uniform:
+            size_series = hotels_df[size_col].dropna() if size_col in hotels_df.columns else pd.Series(dtype=float)
+            size_min, size_max = (size_series.min(), size_series.max()) if not size_series.empty else (0, 1)
         hotel_layer = folium.FeatureGroup(name="Hôtels", show=True)
         for _, row in hotels_df.iterrows():
             if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
                 continue
-            size_value = row.get(size_col)
-            has_size = size_value is not None and not (isinstance(size_value, float) and pd.isna(size_value))
-            radius = scale_radius(size_value, size_min, size_max) * size_scale if has_size else BASE_DOT_RADIUS
+            if size_uniform:
+                radius = uniform_radius
+            else:
+                size_value = row.get(size_col)
+                has_size = size_value is not None and not (isinstance(size_value, float) and pd.isna(size_value))
+                radius = scale_radius(size_value, size_min, size_max) * size_scale if has_size else BASE_DOT_RADIUS
             if color_mode == "booking_bands":
                 band_idx = booking_band_index(row.get("Note Booking"), color_map["edges"])
                 color = (
@@ -1105,7 +1136,8 @@ def main():
     )
 
     hotels_df, pois_df = sidebar_data_sources()
-    show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_label, size_scale = sidebar_map_settings(hotels_df, pois_df)
+    (show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice,
+     tooltip_fields, size_col, size_label, size_scale, size_uniform, uniform_radius, pois_df_for_map) = sidebar_map_settings(hotels_df, pois_df)
     hotels_data_version = HOTELS_PERSIST_PATH.stat().st_mtime if HOTELS_PERSIST_PATH.exists() else 0
     filtered_df = sidebar_filters(hotels_df, hotels_data_version)
     sidebar_distance_filter(pois_df)
@@ -1156,7 +1188,8 @@ def main():
     kpi_cols[3].metric("Chambres (capacité totale)", f"{int(filtered_df['Capacité act (cha.)'].sum(skipna=True)):,}".replace(",", " "))
     kpi_cols[4].metric("Chambres allouées", f"{int(filtered_df['#Chambres alloues total'].sum(skipna=True)):,}".replace(",", " "))
 
-    fmap = build_map(filtered_df, pois_df, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map, basemap_choice, tooltip_fields, size_col, size_scale, n_estimated_for_banner)
+    fmap = build_map(filtered_df, pois_df_for_map, show_hotels, active_poi_layers, color_mode, color_map, poi_color_map,
+                      basemap_choice, tooltip_fields, size_col, size_scale, size_uniform, uniform_radius, n_estimated_for_banner)
     map_state = st_folium(fmap, use_container_width=True, height=720, key="main_map",
                            returned_objects=["last_clicked", "last_object_clicked"])
 
@@ -1237,9 +1270,9 @@ def main():
     with st.expander("ℹ️ À propos de cet outil / prochaines étapes"):
         st.markdown(
             """
-            - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque couche de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale — une couche par type (onglet du fichier POI), et une couche séparée par sous-type quand l'onglet en distingue (ex. sites d'entraînement VSTS / TBC / RBC).
+            - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque couche de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale — une couche par type (onglet du fichier POI), et une couche séparée par sous-type quand l'onglet en distingue (ex. sites d'entraînement VSTS / TBC / RBC). Le filtre "Ville (points d'intérêt)" restreint les POI affichés à une ou plusieurs villes, tous types confondus. Le zoom à la molette avance par crans fins (un quart de niveau) pour repérer facilement des hôtels très proches les uns des autres. Dans le fichier POI, une colonne "Activation" (Oui/Non) optionnelle par onglet permet de masquer un point sans le supprimer du fichier — absente, toutes les lignes de l'onglet sont affichées.
             - **Filtres** : ville hôte, classement, statut, signature, risque, capacité, note Booking, allocation (VSTH, TBCTH, FIFA HQ, FIFA VIP, FIFA Venue, RBC, Com, Hospi, HB, Media, IBC — un hôtel correspond dès qu'il a des chambres allouées à au moins un des groupes cochés), regroupés dans le bloc "🔍 Filtres", plus la recherche par nom dans un second volet.
-            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs". À partir d'un certain niveau de zoom, un badge façon Booking.com (fond bleu, note à une décimale) apparaît au-dessus de chaque bulle — gris avec un tiret pour un hôtel sans note.
+            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; coche "Bulles toutes de la même taille" pour désactiver la proportionnalité et régler à la place une taille unique pour tous les hôtels. Couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs". À partir d'un certain niveau de zoom, un badge façon Booking.com (fond bleu, note à une décimale) apparaît au-dessus de chaque bulle — gris avec un tiret pour un hôtel sans note.
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
             - **Distance / Temps de trajet** : active le filtre, puis choisis la source du point de référence — "Point choisi" (clic sur la carte ou coordonnées saisies, toujours en distance à vol d'oiseau) ou "Point d'intérêt" (permet en plus le temps de trajet réel en voiture). En mode point d'intérêt, choisis d'abord le type (stade, site d'entraînement...), puis la ville si l'onglet en propose une, puis le point précis. En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable. Un bandeau jaune en haut à droite de la carte signale quand des temps affichés sont des estimations interpolées (pas encore de vrai calcul, voir `scripts/estimate_travel_times.py`).
             - **Photos** : dépose des images dans `data/photos/<Ville hôte>/<ID de l'hôtel>/` (ex. `data/photos/Casablanca/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Quand un hôtel a plusieurs photos, cliquer sur sa bulle ouvre aussi la galerie complète juste sous la carte (bouton "✕ Fermer" pour la masquer). Aucune modification du fichier Excel n'est nécessaire.

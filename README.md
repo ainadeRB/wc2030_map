@@ -16,11 +16,15 @@ les bibliothèques Python).
 ## Fonctionnalités
 
 - **Carte interactive**, fond de carte au choix (standard OpenStreetMap,
-  clair épuré, satellite, relief — tous sans clé API), avec des bulles :
+  clair épuré, satellite, relief — tous sans clé API), zoom à la molette par
+  crans fins (un quart de niveau à la fois, pour repérer facilement des
+  hôtels très proches sans sauter par-dessus), avec des bulles :
   - **taille** selon un champ numérique au choix (capacité, chambres
     allouées, PMC, note Booking), avec un curseur d'échelle pour
     agrandir/rétrécir sans perdre la proportionnalité ; un hôtel sans
-    valeur pour ce champ garde un point de taille fixe ;
+    valeur pour ce champ garde un point de taille fixe. Case "Bulles toutes
+    de la même taille" pour désactiver la proportionnalité et régler à la
+    place une taille unique, identique pour tous les hôtels ;
   - **couleur** selon un critère au choix (classement étoiles ou brut,
     catégorie, statut, ville hôte, signature, risque, visite, ou **note
     Booking par tranches**), avec une couleur personnalisable par valeur.
@@ -46,7 +50,14 @@ les bibliothèques Python).
   chacune devient sa propre couche, activable indépendamment. Couleur de
   chaque type de point d'intérêt personnalisable (icône automatiquement
   noire ou blanche selon la couleur choisie, pour rester lisible) —
-  également sauvegardée automatiquement.
+  également sauvegardée automatiquement. Un filtre **Ville** (quand la
+  colonne existe dans le fichier POI) restreint les points d'intérêt
+  affichés, tous types confondus, à une ou plusieurs villes.
+- **Colonne "Activation" (Oui/Non) optionnelle** dans le fichier POI, onglet
+  par onglet : quand elle est présente, seules les lignes "Oui" sont
+  affichées — pratique pour retirer temporairement un point sans le
+  supprimer du fichier ni devoir le rajouter plus tard. Absente, toutes les
+  lignes de l'onglet sont affichées comme avant.
 - **Filtres** : ville hôte, classement, statut, signature (simplifiée en
   Oui/Non — "Oui" si la colonne vaut "yes", quelle que soit la casse),
   risque, capacité, note Booking, allocation (VSTH, TBCTH, FIFA HQ, FIFA
