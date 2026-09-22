@@ -766,6 +766,12 @@ def sidebar_filters(df: pd.DataFrame, data_version=0):
                 if chosen:
                     filtered = filtered[filtered[col].isin(chosen)]
 
+            alloc_labels = [label for label, _ in ALLOCATION_FILTER_OPTIONS]
+            alloc_chosen = st.multiselect("Allocation", alloc_labels, default=[], key=f"filt_{data_version}_allocation")
+            if alloc_chosen:
+                chosen_cols = [col for label, col in ALLOCATION_FILTER_OPTIONS if label in alloc_chosen]
+                filtered = filtered[filtered[chosen_cols].gt(0).any(axis=1)]
+
             for label, col in NUMERIC_FILTERS_IN_SIDEBAR:
                 series = filtered[col].dropna()
                 if series.empty:
@@ -776,12 +782,6 @@ def sidebar_filters(df: pd.DataFrame, data_version=0):
                 lo, hi = st.slider(label, min_value=float(np.floor(vmin)), max_value=float(np.ceil(vmax)),
                                     value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{data_version}_{col}")
                 filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
-
-            alloc_labels = [label for label, _ in ALLOCATION_FILTER_OPTIONS]
-            alloc_chosen = st.multiselect("Allocation", alloc_labels, default=[], key=f"filt_{data_version}_allocation")
-            if alloc_chosen:
-                chosen_cols = [col for label, col in ALLOCATION_FILTER_OPTIONS if label in alloc_chosen]
-                filtered = filtered[filtered[chosen_cols].gt(0).any(axis=1)]
 
         with st.expander("🔎 Recherche"):
             search = st.text_input("Nom de l'hôtel contient...", "")
