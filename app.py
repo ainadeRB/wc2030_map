@@ -3,6 +3,7 @@ et points d'intérêt (stades, sites d'entraînement, aéroports...).
 
 Lancer avec : streamlit run app.py
 """
+import hashlib
 import html as html_lib
 import json
 from io import BytesIO
@@ -686,9 +687,24 @@ def _load_with_persistence(uploader_label, uploader_key, persist_path: Path, def
     uploaded = st.file_uploader(uploader_label, type=["xlsx", "xls"], key=uploader_key)
 
     if uploaded is not None:
-        persist_path.parent.mkdir(parents=True, exist_ok=True)
-        persist_path.write_bytes(uploaded.getvalue())
-        st.success(f"Fichier enregistré → `{persist_path}`")
+        # `st.file_uploader` redonne le MÊME fichier déposé à chaque rerun
+        # tant qu'il reste sélectionné dans le widget (pas seulement au
+        # moment du dépôt) : sans cette vérification, on réécrivait donc le
+        # fichier sur disque à chaque interaction, même quand son contenu
+        # n'avait pas changé, ce qui changeait sa date de modification
+        # (`data_version`, voir sidebar_filters) en continu et réinitialisait
+        # TOUS les filtres à chaque clic — observé en conditions réelles
+        # juste après un nouvel upload (le filtre Allocation se vidait tout
+        # seul à chaque case cochée). On ne réécrit donc que si le contenu a
+        # réellement changé.
+        content = uploaded.getvalue()
+        content_hash = hashlib.md5(content).hexdigest()
+        hash_key = f"_persisted_hash_{uploader_key}"
+        if st.session_state.get(hash_key) != content_hash:
+            persist_path.parent.mkdir(parents=True, exist_ok=True)
+            persist_path.write_bytes(content)
+            st.session_state[hash_key] = content_hash
+            st.success(f"Fichier enregistré → `{persist_path}`")
 
     if persist_path.exists():
         mtime = pd.Timestamp.fromtimestamp(persist_path.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
