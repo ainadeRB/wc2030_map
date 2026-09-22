@@ -16,7 +16,7 @@ from folium.utilities import escape_backticks
 from jinja2 import Template
 from streamlit_folium import st_folium
 
-from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois
+from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois, strip_allocation_prefix
 from src.geo import bounds_for, haversine_km
 from src.photos import get_hotel_photos, get_thumbnail_data_uri
 from src.routing import get_travel_times_with_fallback, using_ors
@@ -209,6 +209,13 @@ NUMERIC_FILTERS_IN_SIDEBAR = [
     ("Capacité", "Capacité act (cha.)"),
     ("Note Booking", "Note Booking"),
 ]
+
+# Options du filtre "Allocation" : un hôtel correspond dès qu'il a des
+# chambres allouées (valeur > 0) à AU MOINS UN des groupes cochés (voir
+# sidebar_filters) — mêmes colonnes que le résumé "Allocations" affiché en
+# infobulle (voir data_loader._format_allocations), juste libellées sans
+# le numéro d'ordre du fichier source.
+ALLOCATION_FILTER_OPTIONS = [(strip_allocation_prefix(col), col) for col in ALLOCATION_COLUMNS]
 
 # Liste complète des champs numériques utilisables pour la TAILLE des
 # bulles (sidebar_map_settings) — plus large que NUMERIC_FILTERS_IN_SIDEBAR
@@ -770,6 +777,12 @@ def sidebar_filters(df: pd.DataFrame, data_version=0):
                                     value=(float(np.floor(vmin)), float(np.ceil(vmax))), key=f"filt_{data_version}_{col}")
                 filtered = filtered[filtered[col].between(lo, hi) | filtered[col].isna()]
 
+            alloc_labels = [label for label, _ in ALLOCATION_FILTER_OPTIONS]
+            alloc_chosen = st.multiselect("Allocation", alloc_labels, default=[], key=f"filt_{data_version}_allocation")
+            if alloc_chosen:
+                chosen_cols = [col for label, col in ALLOCATION_FILTER_OPTIONS if label in alloc_chosen]
+                filtered = filtered[filtered[chosen_cols].gt(0).any(axis=1)]
+
         with st.expander("🔎 Recherche"):
             search = st.text_input("Nom de l'hôtel contient...", "")
             only_geo = st.checkbox("Afficher uniquement les hôtels géolocalisés", value=True)
@@ -1225,7 +1238,7 @@ def main():
         st.markdown(
             """
             - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque couche de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale — une couche par type (onglet du fichier POI), et une couche séparée par sous-type quand l'onglet en distingue (ex. sites d'entraînement VSTS / TBC / RBC).
-            - **Filtres** : tous les champs du fichier hôtels sont filtrables, regroupés dans le bloc "🔍 Filtres" (localisation, classification, capacité, prix, dates, parties prenantes, signature, risque, visite).
+            - **Filtres** : ville hôte, classement, statut, signature, risque, capacité, note Booking, allocation (VSTH, TBCTH, FIFA HQ, FIFA VIP, FIFA Venue, RBC, Com, Hospi, HB, Media, IBC — un hôtel correspond dès qu'il a des chambres allouées à au moins un des groupes cochés), regroupés dans le bloc "🔍 Filtres", plus la recherche par nom dans un second volet.
             - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs". À partir d'un certain niveau de zoom, un badge façon Booking.com (fond bleu, note à une décimale) apparaît au-dessus de chaque bulle — gris avec un tiret pour un hôtel sans note.
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
             - **Distance / Temps de trajet** : active le filtre, puis choisis la source du point de référence — "Point choisi" (clic sur la carte ou coordonnées saisies, toujours en distance à vol d'oiseau) ou "Point d'intérêt" (permet en plus le temps de trajet réel en voiture). En mode point d'intérêt, choisis d'abord le type (stade, site d'entraînement...), puis la ville si l'onglet en propose une, puis le point précis. En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable. Un bandeau jaune en haut à droite de la carte signale quand des temps affichés sont des estimations interpolées (pas encore de vrai calcul, voir `scripts/estimate_travel_times.py`).

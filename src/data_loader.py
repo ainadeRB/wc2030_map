@@ -34,8 +34,9 @@ MOROCCO_BOUNDS = {"lat": (20.0, 36.5), "lon": (-17.5, -0.5)}
 
 
 # "1.VSTH" -> "VSTH", "3. FIFA HQ" -> "FIFA HQ" : le numéro d'ordre du
-# fichier source n'a pas sa place dans un résumé lisible à l'écran.
-def _strip_allocation_prefix(col: str) -> str:
+# fichier source n'a pas sa place dans un résumé lisible à l'écran (utilisé
+# aussi par app.py pour libeller le filtre "Allocation").
+def strip_allocation_prefix(col: str) -> str:
     return re.sub(r"^\d+\.\s*", "", col)
 
 
@@ -46,7 +47,7 @@ def _format_allocations(row) -> "str | float":
     valeur non nulle, plutôt que d'obliger à maintenir une colonne à part
     dans Excel."""
     parts = [
-        f"{_strip_allocation_prefix(col)} : {int(row[col])}"
+        f"{strip_allocation_prefix(col)} : {int(row[col])}"
         for col in ALLOCATION_COLUMNS
         if pd.notna(row[col]) and row[col] > 0
     ]

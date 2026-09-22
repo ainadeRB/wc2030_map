@@ -49,7 +49,10 @@ les bibliothèques Python).
   également sauvegardée automatiquement.
 - **Filtres** : ville hôte, classement, statut, signature (simplifiée en
   Oui/Non — "Oui" si la colonne vaut "yes", quelle que soit la casse),
-  risque, capacité, note Booking, recherche par nom.
+  risque, capacité, note Booking, allocation (VSTH, TBCTH, FIFA HQ, FIFA
+  VIP, FIFA Venue, RBC, Com, Hospi, HB, Media, IBC — un hôtel correspond dès
+  qu'il a des chambres allouées à au moins un des groupes cochés), recherche
+  par nom.
 - **Infos au survol configurables** : choisis les champs affichés dans
   l'infobulle ; le clic affiche toujours la fiche complète. Un champ sans
   valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
