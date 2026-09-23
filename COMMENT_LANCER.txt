@@ -35,7 +35,10 @@ DÉMARRAGE
 2. Au tout premier lancement, une fenêtre noire s'ouvre et installe
    automatiquement ce qu'il faut (quelques minutes, connexion internet
    nécessaire UNIQUEMENT pour cette étape). Les lancements suivants
-   sont quasi instantanés.
+   sont quasi instantanés. Un raccourci "Carte Hotels WC2030" est aussi
+   créé automatiquement sur ton Bureau dès ce premier lancement : la
+   prochaine fois, double-clique directement dessus, plus besoin de
+   rouvrir ce dossier.
 
 3. Un onglet s'ouvre dans ton navigateur avec l'application, déjà
    chargée avec des données de démonstration.
@@ -43,6 +46,8 @@ DÉMARRAGE
 4. Pour arrêter l'application : ferme la fenêtre noire (celle du
    terminal). Fermer juste l'onglet du navigateur ne suffit pas — la
    fenêtre noire doit rester ouverte tant que tu utilises l'app.
+   Pour la relancer : redouble-clique sur le raccourci du Bureau (ou
+   sur "Lancer_l_app.bat" dans ce dossier, ça marche aussi).
 
 
 IMPORTER TES PROPRES DONNÉES

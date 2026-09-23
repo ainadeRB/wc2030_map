@@ -4,6 +4,15 @@ title Coupe du Monde 2030 - Carte Hotels
 
 cd /d "%~dp0"
 
+set "SHORTCUT=%USERPROFILE%\Desktop\Carte Hotels WC2030.lnk"
+if exist "%SHORTCUT%" goto :shortcut_done
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = New-Object -ComObject WScript.Shell; $sc = $s.CreateShortcut('%SHORTCUT%'); $sc.TargetPath = '%~dpnx0'; $sc.WorkingDirectory = '%~dp0'; $sc.IconLocation = 'shell32.dll,13'; $sc.Save()" >nul 2>nul
+echo.
+echo Un raccourci "Carte Hotels WC2030" vient d'etre cree sur ton Bureau.
+echo La prochaine fois, double-clique directement dessus : plus besoin d'ouvrir ce dossier.
+echo.
+:shortcut_done
+
 set "PYEXE="
 
 python --version >nul 2>nul
