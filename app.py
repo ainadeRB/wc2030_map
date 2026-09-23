@@ -823,7 +823,15 @@ def sidebar_map_settings(hotels_df: pd.DataFrame, pois_df: pd.DataFrame):
         if poi_cities:
             poi_city_filter = st.multiselect("Ville (points d'intérêt)", poi_cities, default=[])
             if poi_city_filter:
-                pois_df = pois_df[pois_df["Ville"].isin(poi_city_filter)]
+                # Un onglet sans colonne "Ville" (ex. Stades, souvent juste
+                # nom + coordonnées) donne "Ville" = vide pour tous ses
+                # points : les exclure ferait disparaître toute la couche
+                # dès qu'un filtre Ville est actif, même si l'un de ces
+                # points est en réalité dans une ville cochée. On les garde
+                # donc toujours visibles, comme pour les filtres numériques
+                # (voir sidebar_filters) — seuls les points dont la ville
+                # EST renseignée et NE correspond PAS au filtre sont exclus.
+                pois_df = pois_df[pois_df["Ville"].isin(poi_city_filter) | pois_df["Ville"].isna()]
 
         active_poi_layers = []
         poi_types = sorted(pois_df["Type"].dropna().unique().tolist()) if not pois_df.empty else []
