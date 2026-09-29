@@ -5,6 +5,10 @@
 .devcontainer export-ignore
 .gitattributes export-ignore
 .gitignore export-ignore
+# Outil pour publier une mise à jour vers un dossier d'équipe partagé
+# (SharePoint/OneDrive) — usage personnel de qui maintient le projet,
+# aucun intérêt pour quelqu'un qui télécharge juste l'app pour la lancer.
+Publier_vers_equipe.bat export-ignore
 
 # Contient des URLs vers de vraies photos d'hôtels (utile UNIQUEMENT pour la
 # version hébergée en ligne, qui n'a pas de disque local persistant — voir
