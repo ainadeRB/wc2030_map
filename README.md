@@ -13,6 +13,28 @@ dans le ZIP). Tout tourne sur la machine de la personne qui l'utilise ;
 seule la toute première installation a besoin d'internet (pour récupérer
 les bibliothèques Python).
 
+### Partager les données au sein d'une équipe (SharePoint/OneDrive)
+
+Le dossier de l'appli (dézippé) peut être déposé dans une bibliothèque
+SharePoint partagée puis synchronisé sur chaque poste via OneDrive : chacun
+voit alors ce même dossier comme un dossier normal sur son PC, et peut
+double-cliquer sur `Lancer_l_app.bat` directement depuis là — sans avoir à
+télécharger de ZIP. Comme `data/hotels.xlsx`, `data/poi.xlsx` et
+`data/photos/` vivent dans ce même dossier, ils sont alors automatiquement
+partagés (et synchronisés) avec toute l'équipe ayant accès à cette
+bibliothèque — pratique pour travailler sur les mêmes données sans
+redéposer les fichiers à chaque fois. Seules deux choses restent privées à
+chaque poste, jamais synchronisées : les préférences d'affichage
+personnelles (couleurs/tailles de bulles, dans `%LOCALAPPDATA%\WC2030Map\`)
+et l'environnement Python installé par le lanceur (même dossier), pour que
+chacun garde ses propres réglages et qu'un environnement Python — jamais
+portable d'un poste à l'autre — ne se retrouve pas à synchroniser des
+milliers de petits fichiers inutiles.
+
+Cette option n'a de sens que si **seule l'équipe concernée a accès à la
+bibliothèque SharePoint** : c'est elle qui fait alors office de contrôle
+d'accès (personne d'autre ne peut ouvrir l'outil ni voir les données).
+
 ## Fonctionnalités
 
 - **Carte interactive**, fond de carte au choix (standard OpenStreetMap,

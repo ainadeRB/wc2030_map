@@ -6,6 +6,7 @@ Lancer avec : streamlit run app.py
 import hashlib
 import html as html_lib
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -37,13 +38,29 @@ st.set_page_config(page_title="WC2030 Maroc – Carte Hôtels", page_icon="🗺�
 DATA_DIR = Path("data")
 DEFAULT_HOTELS = DATA_DIR / "sample_hotels.xlsx"
 DEFAULT_POIS = DATA_DIR / "sample_poi.xlsx"
-# Fichiers réels de l'utilisateur : écrasés à chaque upload, conservés entre les sessions.
+# Fichiers réels de l'utilisateur : écrasés à chaque upload, conservés entre les
+# sessions. Volontairement DANS le dossier de l'appli (donc partagés avec toute
+# l'équipe quand ce dossier est lui-même synchronisé via SharePoint/OneDrive) —
+# c'est le but recherché pour une équipe qui travaille sur les mêmes données.
 HOTELS_PERSIST_PATH = DATA_DIR / "hotels.xlsx"
 POIS_PERSIST_PATH = DATA_DIR / "poi.xlsx"
+
+
+def _local_app_data_dir() -> Path:
+    """Dossier privé à CETTE machine, jamais synchronisé (SharePoint/OneDrive)
+    même si le dossier de l'appli l'est — sert aux préférences d'affichage
+    personnelles ci-dessous : chacun doit garder ses propres couleurs/tailles
+    de bulles, pas un réglage écrasé par le dernier collègue à avoir cliqué."""
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "WC2030Map"
+
+
 # Préférences d'affichage (taille/couleur des bulles) : réécrit à chaque
 # changement, pour ne pas avoir à refaire ses couleurs à chaque redémarrage
 # de l'app (la session Streamlit, elle, ne survit pas à un redémarrage).
-UI_PREFS_PATH = DATA_DIR / "ui_prefs.json"
+# Personnelles à chaque utilisateur (voir _local_app_data_dir), à la
+# différence des fichiers de données réelles ci-dessus.
+UI_PREFS_PATH = _local_app_data_dir() / "ui_prefs.json"
 
 COLOR_MODES = {
     "Nouveau classement assimilé (étoiles)": "stars",

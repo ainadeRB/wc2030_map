@@ -101,11 +101,20 @@ if not defined PYEXE (
     echo.
 )
 
-if not exist ".venv\Scripts\activate.bat" (
+rem Environnement Python cree HORS de ce dossier (dans le profil Windows de
+rem l'utilisateur) expres : ce dossier peut etre un dossier partage
+rem synchronise (SharePoint/OneDrive), et un environnement Python ne doit
+rem jamais etre synchronise entre plusieurs machines (chemins internes
+rem propres a chaque poste, des milliers de petits fichiers inutiles a
+rem synchroniser). Un seul environnement est ainsi reutilise sur cette
+rem machine, peu importe le dossier de code utilise.
+set "VENV_DIR=%LOCALAPPDATA%\WC2030Map\venv"
+
+if not exist "%VENV_DIR%\Scripts\activate.bat" (
     echo.
     echo Creation de l'environnement Python...
     echo.
-    "%PYEXE%" -m venv .venv
+    "%PYEXE%" -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo.
         echo Erreur : impossible de creer l'environnement Python.
@@ -114,9 +123,9 @@ if not exist ".venv\Scripts\activate.bat" (
     )
 )
 
-call .venv\Scripts\activate.bat
+call "%VENV_DIR%\Scripts\activate.bat"
 
-if not exist ".venv\Scripts\streamlit.exe" (
+if not exist "%VENV_DIR%\Scripts\streamlit.exe" (
     echo.
     echo Installation des dependances, ca peut prendre quelques minutes
     echo ^(connexion internet necessaire pour cette etape uniquement^)...
@@ -125,7 +134,7 @@ if not exist ".venv\Scripts\streamlit.exe" (
     python -m pip install -r requirements.txt
 )
 
-if not exist ".venv\Scripts\streamlit.exe" (
+if not exist "%VENV_DIR%\Scripts\streamlit.exe" (
     echo.
     echo ============================================================
     echo  L'installation des dependances a echoue.
