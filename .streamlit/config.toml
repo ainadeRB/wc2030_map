@@ -8,10 +8,13 @@ font = "sans serif"
 # Barre latérale (filtres, carte, données) : vert foncé de marque, distinct
 # du reste de l'app — pris en charge depuis Streamlit 1.4x via [theme.sidebar],
 # sans affecter le fond de la zone principale (carte, tableau...).
+# primaryColor en doré plutôt qu'en blanc : une case cochée (remplie avec
+# primaryColor) doit nettement se distinguer d'une case vide (blanche) —
+# du blanc sur blanc ne se voyait quasiment pas.
 [theme.sidebar]
 backgroundColor = "#056432"
 secondaryBackgroundColor = "#0B7A3D"
-primaryColor = "#ffffff"
+primaryColor = "#FFD166"
 textColor = "#ffffff"
 
 [server]

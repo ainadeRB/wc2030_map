@@ -1178,6 +1178,22 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
 
 def main():
     init_state()
+    # Les étiquettes des options choisies dans un multiselect (ex. "Infos au
+    # survol") gardent un fond blanc fixe quel que soit le thème — avec le
+    # texte blanc de la barre latérale (voir [theme.sidebar] dans
+    # .streamlit/config.toml), elles devenaient illisibles (texte blanc sur
+    # fond blanc). On force donc leur texte en sombre explicitement.
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] span[data-baseweb="tag"],
+        section[data-testid="stSidebar"] span[data-baseweb="tag"] span {
+            color: #1a1a1a !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("🗺️ Coupe du Monde 2030 – Maroc — Cartographie Hôtels & Sites")
 
     hotels_df, pois_df = sidebar_data_sources()
