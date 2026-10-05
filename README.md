@@ -82,10 +82,12 @@ d'accès (personne d'autre ne peut ouvrir l'outil ni voir les données).
   lignes de l'onglet sont affichées comme avant.
 - **Filtres** : ville hôte, classement, statut, signature (simplifiée en
   Oui/Non — "Oui" si la colonne vaut "yes", quelle que soit la casse),
-  risque, capacité, note Booking, allocation (VSTH, TBCTH, FIFA HQ, FIFA
-  VIP, FIFA Venue, RBC, Com, Hospi, HB, Media, IBC — un hôtel correspond dès
-  qu'il a des chambres allouées à au moins un des groupes cochés), recherche
-  par nom.
+  risque, capacité, note Booking, allocation — une case "Afficher
+  uniquement les hôtels alloués" pour ne garder que les hôtels ayant au
+  moins une allocation (peu importe laquelle), puis un détail par groupe
+  (VSTH, TBCTH, FIFA HQ, FIFA VIP, FIFA Venue, RBC, Com, Hospi, HB, Media,
+  IBC — un hôtel correspond dès qu'il a des chambres allouées à au moins un
+  des groupes cochés) —, recherche par nom.
 - **Infos au survol configurables** : choisis les champs affichés dans
   l'infobulle ; le clic affiche toujours la fiche complète. Un champ sans
   valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
