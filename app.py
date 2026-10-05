@@ -77,12 +77,15 @@ COLOR_MODES = {
 # Fonds de carte gratuits, sans clé API (CARTO exige désormais une clé,
 # on utilise donc Esri/OpenStreetMap/OpenTopoMap qui restent libres d'accès).
 BASEMAPS = {
-    "Standard (rues, recommandé)": {"tiles": "OpenStreetMap", "attr": None, "max_zoom": 19},
+    # Premier de la liste = fond de carte par défaut au démarrage (voir
+    # sidebar_map_settings, index=0) ; l'utilisateur reste libre d'en
+    # choisir un autre à tout moment via le menu déroulant "Fond de carte".
     "Clair épuré (gris)": {
         "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         "attr": "Tiles &copy; Esri — Esri, DeLorme, NAVTEQ",
         "max_native_zoom": 16, "max_zoom": 19,
     },
+    "Standard (rues, recommandé)": {"tiles": "OpenStreetMap", "attr": None, "max_zoom": 19},
     "Satellite": {
         "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         "attr": "Tiles &copy; Esri — Esri, Maxar, Earthstar Geographics",
@@ -1176,10 +1179,6 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
 def main():
     init_state()
     st.title("🗺️ Coupe du Monde 2030 – Maroc — Cartographie Hôtels & Sites")
-    st.caption(
-        "Carte interactive type Kepler.gl : couches activables, filtres sur toutes les colonnes, "
-        "bulles proportionnelles à la capacité et colorées par qualité, filtre par distance en cliquant sur la carte."
-    )
 
     hotels_df, pois_df = sidebar_data_sources()
     (show_hotels, active_poi_layers, color_mode, color_label, color_map, poi_color_map, basemap_choice,
