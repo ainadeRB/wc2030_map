@@ -1178,17 +1178,29 @@ def build_map(hotels_df, pois_df, show_hotels, active_poi_layers, color_mode, co
 
 def main():
     init_state()
-    # Les étiquettes des options choisies dans un multiselect (ex. "Infos au
-    # survol") gardent un fond blanc fixe quel que soit le thème — avec le
-    # texte blanc de la barre latérale (voir [theme.sidebar] dans
-    # .streamlit/config.toml), elles devenaient illisibles (texte blanc sur
-    # fond blanc). On force donc leur texte en sombre explicitement.
+    # Dans la barre latérale (voir [theme.sidebar] dans .streamlit/config.toml),
+    # primaryColor (rouge) pilote à la fois les cases cochées (où ça rend très
+    # bien) ET, par défaut, les étiquettes des filtres multiselect + le
+    # curseur — où un rose très clair est préféré. Comme un seul réglage de
+    # thème ne peut pas distinguer les deux usages, on force ces deux derniers
+    # via CSS ciblé, sans toucher aux cases à cocher.
     st.markdown(
         """
         <style>
         section[data-testid="stSidebar"] span[data-baseweb="tag"],
+        section[data-testid="stSidebar"] div[data-baseweb="tag"] {
+            background-color: #FBE3E8 !important;
+            color: #1a1a1a !important;
+        }
         section[data-testid="stSidebar"] span[data-baseweb="tag"] span {
             color: #1a1a1a !important;
+        }
+        section[data-testid="stSidebar"] div[data-baseweb="slider"] [role="slider"] {
+            background-color: #FBE3E8 !important;
+            border-color: #FBE3E8 !important;
+        }
+        section[data-testid="stSidebar"] div[data-baseweb="slider"] > div > div:nth-child(2) {
+            background-color: #FBE3E8 !important;
         }
         </style>
         """,
