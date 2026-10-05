@@ -99,11 +99,12 @@ production from a stale prefs file).
 2. **Offline/local ZIP**: GitHub "Code → Download ZIP" (or `git archive
    --format=zip -o out.zip HEAD`, which respects `.gitattributes
    export-ignore` the same way), containing `Lancer_l_app.bat` — a
-   self-healing Windows one-click launcher (creates a venv, installs
-   `requirements.txt`, launches Streamlit). It must work with **zero
-   internet dependency beyond the first install**, and zero prior Python
-   knowledge. Non-obvious things baked into it from real user testing, don't
-   regress them:
+   self-healing Windows one-click launcher (creates a venv in
+   `%LOCALAPPDATA%\WC2030Map\venv`, outside the app folder so it's never
+   caught in a SharePoint/OneDrive sync — installs `requirements.txt`,
+   launches Streamlit). It must work with **zero internet dependency
+   beyond the first install**, and zero prior Python knowledge. Non-obvious
+   things baked into it from real user testing, don't regress them:
    - Uses `python -m pip install ...` and `python -m streamlit run ...`
      rather than bare `pip`/`streamlit` executables — invoking a
      just-written `.exe` directly right after it's created can fail with a
@@ -121,6 +122,13 @@ production from a stale prefs file).
      careful manual line-by-line review.
    - `.gitattributes` `export-ignore` controls what's excluded from this ZIP
      (dev-only files, and the sensitive photo manifest — see above).
+   - The launcher only runs `pip install -r requirements.txt` when
+     `streamlit.exe` doesn't exist yet in that venv — an already-installed
+     user never gets a dependency *upgrade*, only a fresh install gets the
+     current `requirements.txt` floor. Raising a version floor (e.g.
+     `streamlit>=1.64` for `[theme.sidebar]` support) silently does nothing
+     for existing installs; say so explicitly when it matters (delete
+     `%LOCALAPPDATA%\WC2030Map\venv` once to force a clean reinstall).
 
 ## Repository visibility
 

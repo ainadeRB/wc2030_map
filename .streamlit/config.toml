@@ -5,5 +5,14 @@ secondaryBackgroundColor = "#f4f2ee"
 textColor = "#1a1a1a"
 font = "sans serif"
 
+# Barre latérale (filtres, carte, données) : vert foncé de marque, distinct
+# du reste de l'app — pris en charge depuis Streamlit 1.4x via [theme.sidebar],
+# sans affecter le fond de la zone principale (carte, tableau...).
+[theme.sidebar]
+backgroundColor = "#056432"
+secondaryBackgroundColor = "#0B7A3D"
+primaryColor = "#ffffff"
+textColor = "#ffffff"
+
 [server]
 headless = true
