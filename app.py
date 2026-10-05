@@ -1183,47 +1183,40 @@ def main():
     # bien) ET, par défaut, les étiquettes des filtres multiselect + le
     # curseur — où ça ne doit PAS être rouge. Comme un seul réglage de thème
     # ne peut pas distinguer les deux usages, on force ces deux derniers via
-    # CSS ciblé, sans toucher aux cases à cocher. Plusieurs sélecteurs
-    # redondants par élément : certains attributs internes de Streamlit/
-    # BaseWeb varient selon la version et ne sont pas vérifiables sans
-    # navigateur réel ici — ratisser large maximise les chances que l'un
-    # d'eux matche vraiment, un sélecteur qui ne matche rien ne fait rien.
+    # CSS ciblé, sans toucher aux cases à cocher. Noms d'éléments (data-testid)
+    # vérifiés directement dans le bundle JS installé de Streamlit (inspection
+    # de streamlit/static/static/js/{Slider,Multiselect}.*.js, pas de
+    # navigateur réel disponible ici) plutôt que devinés à l'aveugle.
     st.markdown(
         """
         <style>
-        /* Étiquettes des filtres multiselect : fond blanc uni, texte noir */
-        section[data-testid="stSidebar"] span[data-baseweb="tag"],
-        section[data-testid="stSidebar"] div[data-baseweb="tag"] {
-            background-color: #ffffff !important;
+        /* Étiquettes des filtres multiselect : fond rose clair, texte sombre
+           (le texte de ces étiquettes est blanc en dur côté Streamlit, pas
+           piloté par le thème — d'où l'utilité de forcer les deux ici). */
+        section[data-testid="stSidebar"] [data-testid="stMultiSelectTagsContainer"] > * {
+            background-color: #FBE3E8 !important;
             color: #1a1a1a !important;
-        }
-        section[data-testid="stSidebar"] span[data-baseweb="tag"] span,
-        section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
-        section[data-testid="stSidebar"] span[data-baseweb="tag"] svg,
-        section[data-testid="stSidebar"] div[data-baseweb="tag"] svg {
-            color: #1a1a1a !important;
-            fill: #1a1a1a !important;
         }
 
         /* Curseurs : poignée et piste remplie en rose très clair */
-        section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"],
-        section[data-testid="stSidebar"] div[data-baseweb="slider"] [role="slider"] {
+        section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
             background-color: #FBE3E8 !important;
             border-color: #FBE3E8 !important;
             box-shadow: none !important;
         }
-        section[data-testid="stSidebar"] [data-testid="stSlider"] div[data-baseweb="slider"] > div > div,
-        section[data-testid="stSidebar"] div[data-baseweb="slider"] > div > div {
-            background-color: #FBE3E8 !important;
-        }
-        /* Valeur affichée au-dessus de la poignée : blanc, sans pastille de fond */
-        section[data-testid="stSidebar"] [data-testid="stThumbValue"] {
+        /* Valeur affichée au-dessus de la poignée (ex. "1.00") : blanc,
+           déjà sans fond par défaut côté Streamlit (juste la couleur du
+           texte suit primaryColor, donc rouge, à corriger). */
+        section[data-testid="stSidebar"] [data-testid="stSliderThumbValue"] {
             background: transparent !important;
             color: #ffffff !important;
         }
-        section[data-testid="stSidebar"] [data-testid="stTickBarMin"],
-        section[data-testid="stSidebar"] [data-testid="stTickBarMax"] {
+        /* Valeurs min/max aux extrémités du curseur : blanc plein (au lieu
+           d'un blanc très estompé par défaut, peu lisible sur le vert). */
+        section[data-testid="stSidebar"] [data-testid="stSliderTickBar"] {
+            background: transparent !important;
             color: #ffffff !important;
+            opacity: 1 !important;
         }
         </style>
         """,
