@@ -18,7 +18,7 @@ from folium.utilities import escape_backticks
 from jinja2 import Template
 from streamlit_folium import st_folium
 
-from src.data_loader import ALLOCATION_COLUMNS, load_hotels, load_pois, strip_allocation_prefix
+from src.data_loader import ALLOCATION_COLUMNS, NO_ALLOCATION_LABEL, load_hotels, load_pois, strip_allocation_prefix
 from src.geo import bounds_for, haversine_km
 from src.photos import get_hotel_photos, get_thumbnail_data_uri
 from src.routing import get_travel_times_with_fallback, using_ors
@@ -72,7 +72,15 @@ COLOR_MODES = {
     "Risque": "Risque",
     "Visite": "Visite",
     "Note Booking (tranches)": "booking_bands",
+    # Groupe ayant le plus de chambres allouées (voir
+    # data_loader._main_allocation), "Non alloué" sinon.
+    "Allocation (groupe principal)": "Allocation principale",
 }
+
+# Gris clair par défaut pour les hôtels sans allocation : ils restent
+# visibles mais s'effacent derrière les hôtels alloués, qui sont le sujet de
+# cette coloration.
+NO_ALLOCATION_COLOR = "#BDBDBD"
 
 # Fonds de carte gratuits, sans clé API (CARTO exige désormais une clé,
 # on utilise donc Esri/OpenStreetMap/OpenTopoMap qui restent libres d'accès).
@@ -362,6 +370,8 @@ def get_color_map(color_mode, values):
             st.session_state[state_key] = {v: STAR_COLORS.get(int(v), DEFAULT_COLOR) for v in values}
         else:
             st.session_state[state_key] = build_palette_map(values)
+            if color_mode == "Allocation principale" and NO_ALLOCATION_LABEL in st.session_state[state_key]:
+                st.session_state[state_key][NO_ALLOCATION_LABEL] = NO_ALLOCATION_COLOR
     else:
         for v in values:
             if v not in st.session_state[state_key]:
@@ -1361,7 +1371,7 @@ def main():
             """
             - **Carte** : choisis le fond de carte (clair épuré, standard, satellite, relief) et active/désactive les hôtels et chaque couche de point d'intérêt, dans le bloc "🗺️ Carte" de la barre latérale — une couche par type (onglet du fichier POI), et une couche séparée par sous-type quand l'onglet en distingue (ex. sites d'entraînement VSTS / TBC / RBC). Le filtre "Ville (points d'intérêt)" restreint les POI affichés à une ou plusieurs villes, tous types confondus. Le zoom à la molette avance par crans fins (un quart de niveau) pour repérer facilement des hôtels très proches les uns des autres. Dans le fichier POI, une colonne "Activation" (Oui/Non) optionnelle par onglet permet de masquer un point sans le supprimer du fichier — absente, toutes les lignes de l'onglet sont affichées.
             - **Filtres** : ville hôte, classement, statut, signature, risque, capacité, note Booking, allocation (case "Afficher uniquement les hôtels alloués" pour ne garder que les hôtels ayant au moins une allocation, peu importe laquelle ; puis le détail VSTH, TBCTH, FIFA HQ, FIFA VIP, FIFA Venue, RBC, Com, Hospi, HB, Media, IBC — un hôtel correspond dès qu'il a des chambres allouées à au moins un des groupes cochés), regroupés dans le bloc "🔍 Filtres", plus la recherche par nom dans un second volet.
-            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; coche "Bulles toutes de la même taille" pour désactiver la proportionnalité et régler à la place une taille unique pour tous les hôtels. Couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs". À partir d'un certain niveau de zoom, un badge façon Booking.com (fond bleu, note à une décimale) apparaît au-dessus de chaque bulle — gris avec un tiret pour un hôtel sans note.
+            - **Bulles** : taille = champ numérique au choix (capacité, chambres allouées, PMC, note Booking), ajustable avec le curseur "Échelle des bulles" — un hôtel sans valeur pour ce champ garde un point fixe, non affecté par le curseur ; coche "Bulles toutes de la même taille" pour désactiver la proportionnalité et régler à la place une taille unique pour tous les hôtels. Couleur = critère choisi (classement, catégorie, statut, ville hôte, signature, risque, visite, note Booking par tranches, ou allocation : le groupe qui a le plus de chambres allouées dans l'hôtel, gris clair pour un hôtel non alloué), avec une couleur personnalisable pour chaque valeur via "🎨 Personnaliser les couleurs". À partir d'un certain niveau de zoom, un badge façon Booking.com (fond bleu, note à une décimale) apparaît au-dessus de chaque bulle — gris avec un tiret pour un hôtel sans note.
             - **Survol** : choisis les informations affichées au survol d'un hôtel dans "Infos au survol" (le clic affiche toujours la fiche complète). Un champ sans valeur s'affiche en italique ("Non renseigné") plutôt que d'être masqué.
             - **Distance / Temps de trajet** : active le filtre, puis choisis la source du point de référence — "Point choisi" (clic sur la carte ou coordonnées saisies, toujours en distance à vol d'oiseau) ou "Point d'intérêt" (permet en plus le temps de trajet réel en voiture). En mode point d'intérêt, choisis d'abord le type (stade, site d'entraînement...), puis la ville si l'onglet en propose une, puis le point précis. En mode temps de trajet, le rayon vol d'oiseau sert de pré-filtre, puis le temps réel est calculé via un service de routage en ligne (mis en cache sur disque — un trajet n'est jamais recalculé) ; le "Mode Escorte" permet de simuler un trajet accéléré d'un pourcentage réglable. Un bandeau jaune en haut à droite de la carte signale quand des temps affichés sont des estimations interpolées (pas encore de vrai calcul, voir `scripts/estimate_travel_times.py`).
             - **Photos** : dépose des images dans `data/photos/<Ville hôte>/<ID de l'hôtel>/` (ex. `data/photos/Casablanca/HTL-0001/facade.jpg`) — une vignette apparaît automatiquement au survol, une version plus grande au clic. Quand un hôtel a plusieurs photos, cliquer sur sa bulle ouvre aussi la galerie complète juste sous la carte (bouton "✕ Fermer" pour la masquer). Aucune modification du fichier Excel n'est nécessaire.
