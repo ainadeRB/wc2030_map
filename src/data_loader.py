@@ -54,6 +54,24 @@ def _format_allocations(row) -> "str | float":
     return " · ".join(parts) if parts else np.nan
 
 
+# Valeur de "Allocation principale" pour un hôtel sans aucune chambre allouée.
+NO_ALLOCATION_LABEL = "Non alloué"
+
+
+def _main_allocation(row) -> str:
+    """Groupe ayant le plus de chambres allouées dans cet hôtel (ex.
+    "FIFA VIP"), pour pouvoir colorer les bulles par allocation : une seule
+    couleur par bulle, donc un seul groupe — le détail complet reste visible
+    dans "Allocations". En cas d'égalité, le premier groupe dans l'ordre du
+    fichier l'emporte."""
+    best_col, best_val = None, 0
+    for col in ALLOCATION_COLUMNS:
+        val = row[col]
+        if pd.notna(val) and val > best_val:
+            best_col, best_val = col, val
+    return strip_allocation_prefix(best_col) if best_col else NO_ALLOCATION_LABEL
+
+
 def _find_col(columns, *candidates):
     lowered = {c.lower().strip(): c for c in columns}
     for cand in candidates:
@@ -116,6 +134,7 @@ def load_hotels(file_or_path) -> pd.DataFrame:
         df["#Chambres alloues total"] = df[ALLOCATION_COLUMNS].sum(axis=1, min_count=1)
 
     df["Allocations"] = df.apply(_format_allocations, axis=1)
+    df["Allocation principale"] = df.apply(_main_allocation, axis=1)
 
     for col in ["Ville", "Ville hôte", "Nom", "Catégorie", "Nouveau classement assimilé",
                 "Nouveau Statut vérifié", "Propriétaire", "Opérateur", "Signature Prop",
