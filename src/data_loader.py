@@ -97,10 +97,31 @@ def _find_sheet(sheet_names, target_name):
     return None
 
 
+def _pick_hotels_sheet(xls: pd.ExcelFile):
+    """Onglet à lire comme données hôtels : "bdd_maroc_clean" s'il existe,
+    sinon un onglet dont le nom commence par "BDD_Maroc", sinon le premier
+    onglet qui ressemble à une base hôtels (colonnes Nom +
+    Latitude + Longitude dans la première ligne) — un onglet renommé ou un
+    onglet de sommaire/graphique placé en premier donnait sinon une base
+    vide (0 hôtel) sans aucune explication. Repli final : premier onglet."""
+    named = _find_sheet(xls.sheet_names, HOTELS_SHEET_NAME)
+    if named is not None:
+        return named
+    # Variante renommée de l'onglet ("BDD_Maroc", "bdd maroc v2"...).
+    for name in xls.sheet_names:
+        if re.sub(r"[\s_]+", "_", str(name).strip().lower()).startswith("bdd_maroc"):
+            return name
+    for name in xls.sheet_names:
+        header = {str(c).strip().lower() for c in pd.read_excel(xls, sheet_name=name, nrows=0).columns}
+        if {"nom", "latitude", "longitude"} <= header:
+            return name
+    return xls.sheet_names[0]
+
+
 @st.cache_data(show_spinner=False)
 def load_hotels(file_or_path) -> pd.DataFrame:
     xls = pd.ExcelFile(file_or_path)
-    sheet = _find_sheet(xls.sheet_names, HOTELS_SHEET_NAME) or xls.sheet_names[0]
+    sheet = _pick_hotels_sheet(xls)
     df = pd.read_excel(xls, sheet_name=sheet, dtype=str)
     df.columns = [str(c).strip() for c in df.columns]
 
@@ -165,6 +186,10 @@ def load_hotels(file_or_path) -> pd.DataFrame:
         )
         df = pd.concat([with_id, df[~has_id]]).sort_index()
 
+    # Pour pouvoir expliquer à l'écran une base vide (voir
+    # app.sidebar_data_sources) : quel onglet a été lu, parmi lesquels.
+    df.attrs["sheet"] = str(sheet)
+    df.attrs["sheet_names"] = [str(n) for n in xls.sheet_names]
     return df
 
 

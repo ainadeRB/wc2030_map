@@ -18,7 +18,7 @@ from folium.utilities import escape_backticks
 from jinja2 import Template
 from streamlit_folium import st_folium
 
-from src.data_loader import ALLOCATION_COLUMNS, NO_ALLOCATION_LABEL, load_hotels, load_pois, strip_allocation_prefix
+from src.data_loader import ALLOCATION_COLUMNS, HOTELS_SHEET_NAME, NO_ALLOCATION_LABEL, load_hotels, load_pois, strip_allocation_prefix
 from src.geo import bounds_for, haversine_km
 from src.photos import get_hotel_photos, get_thumbnail_data_uri
 from src.routing import get_travel_times_with_fallback, using_ors
@@ -768,6 +768,13 @@ def sidebar_data_sources():
             "Fichier hôtels (Excel)", "hotel_upload", HOTELS_PERSIST_PATH, DEFAULT_HOTELS, _cached_hotels
         )
         st.caption(hotels_status)
+        if hotels_df.empty:
+            st.warning(
+                f"Aucun hôtel trouvé dans l'onglet « {hotels_df.attrs.get('sheet', '?')} » du fichier. "
+                f"Onglets présents : {', '.join(hotels_df.attrs.get('sheet_names', []))}. "
+                f"Les données doivent être dans un onglet nommé « {HOTELS_SHEET_NAME} », "
+                "avec les noms de colonnes sur la première ligne."
+            )
 
         try:
             pois_df, pois_status = _load_with_persistence(
